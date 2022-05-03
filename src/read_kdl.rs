@@ -4,7 +4,6 @@ use thiserror::Error;
 
 pub mod owned_visit;
 pub mod reflect;
-pub mod visit;
 
 pub struct RustFields(Vec<Field>);
 impl fmt::Display for RustFields {
@@ -37,37 +36,6 @@ pub enum FieldIdentError {
     #[error("Invalid Identifier: `{0}`")]
     Invalid(String),
 }
-#[derive(Clone, Debug, Error)]
-pub enum KdlDeserError {
-    #[error(
-        "You must use explicit field declaration with the `{type_name}` rust type, because \
-it is a struct with named fields and has more than a single field.
-
-Instead of `{type_name} {{\"value\"}} …` you should use the syntax `{type_name} {{.field=\"value\"}} …`"
-    )]
-    NotImplicit { type_name: String },
-    #[error(
-        "The KDL node for `{type_name}` is not compatible with its rust type:
-The rust type has the fields:
-    {missing}
-While those fields are declared in the KDL file:
-    {{actual}}"
-    )]
-    BadStructFields { type_name: String, missing: String },
-    #[error("The type `{0}` is not registered.")]
-    UnregisteredType(String),
-    #[error("Implicit and explicit field declarations shouldn't be mixed.")]
-    ImplicitMix,
-    #[error("Invalid syntax for struct embedded into another one.")]
-    InvalidFieldNode,
-    #[error("There is no node to parse")]
-    EmptyDocument,
-    #[error("This error is for development purpose only")]
-    Todo,
-    #[error("Field identifier is erroneous: {0}")]
-    Ident(#[from] FieldIdentError),
-}
-pub type KdlDResult<T> = Result<T, KdlDeserError>;
 #[cfg(test)]
 #[allow(unused)]
 mod test {

@@ -220,8 +220,8 @@ impl<'r> ExpectFields<'r> {
     fn new(name: &str, reg: &'r TypeRegistry) -> ExpResult<Self> {
         let err = || ExpError::NoSuchType(name.to_string());
         let info = reg
-            .get_with_name(&name)
-            .or_else(|| reg.get_with_short_name(&name))
+            .get_with_name(name)
+            .or_else(|| reg.get_with_short_name(name))
             .ok_or_else(err)?;
 
         // let info = reg.get_with_name(name).ok_or_else(err)?;
