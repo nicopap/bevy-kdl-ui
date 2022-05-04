@@ -1,50 +1,20 @@
-use bevy_reflect::{NamedField, StructInfo};
-use std::fmt;
-use thiserror::Error;
+use bevy_reflect::Reflect;
 
-pub mod owned_visit;
-pub mod reflect;
+mod dyn_wrappers;
+pub mod visit;
 
-pub struct RustFields(Vec<Field>);
-impl fmt::Display for RustFields {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(Field { name, ty }) = self.0.first() {
-            write!(f, "{name}: {ty}")?;
-        }
-        for Field { name, ty } in self.0.iter().skip(1) {
-            write!(f, ", {name}: {ty}")?;
-        }
-        Ok(())
-    }
-}
-pub struct Field {
-    pub name: String,
-    pub ty: String,
-}
-impl RustFields {
-    pub fn from_info(info: &StructInfo) -> Self {
-        let to_field = |f: &NamedField| Field {
-            name: f.name().to_string(),
-            ty: f.id().type_name().to_owned(),
-        };
-        Self(info.iter().map(to_field).collect())
-    }
-}
+pub(super) type DynRefl = Box<dyn Reflect>;
 
-#[derive(Debug, Clone, Error)]
-pub enum FieldIdentError {
-    #[error("Invalid Identifier: `{0}`")]
-    Invalid(String),
-}
 #[cfg(test)]
 #[allow(unused)]
 mod test {
     use super::*;
-    use bevy_reflect::{Reflect, TypeRegistry};
+    use bevy_reflect::{FromReflect, Reflect, TypeRegistration, TypeRegistry};
+    // use bevy_utils::HashMap;
     use kdl::KdlDocument;
 
     #[derive(Reflect, Debug, PartialEq, Default)]
-    pub struct A {
+    struct A {
         x: i32,
         d: D,
         c: C,
@@ -54,20 +24,20 @@ mod test {
     }
 
     #[derive(Reflect, Debug, PartialEq, Default)]
-    pub struct B;
+    struct B;
 
     #[derive(Reflect, Debug, PartialEq, Default)]
-    pub struct C(usize);
+    struct C(f32);
 
-    #[derive(Reflect, Hash, PartialEq, Debug, Default)]
+    #[derive(Clone, Reflect, Hash, PartialEq, Debug, Default, FromReflect)]
     #[reflect(Hash, PartialEq)]
-    pub struct D {
+    struct D {
         x: isize,
     }
 
     #[derive(Reflect, Copy, Clone, PartialEq, Debug)]
     #[reflect_value(PartialEq)]
-    pub enum E {
+    enum E {
         X,
         Y,
     }
@@ -75,6 +45,13 @@ mod test {
         fn default() -> Self {
             Self::X
         }
+    }
+    #[derive(PartialEq, Reflect, Default, Debug)]
+    #[reflect(PartialEq)]
+    // TODO: Vec<D>
+    struct F {
+        b: Option<u8>,
+        d: (i128, f32, String, f32, u32),
     }
 
     #[derive(PartialEq, Clone, Reflect, Default, Debug)]
@@ -93,16 +70,28 @@ mod test {
                 registry.register::<$ty_name>();
             )*})
         }
+        macro_rules! register_more {
+            ($($ty_name:ty ),* $(,)? ) => ({$(
+                registry.add_registration(TypeRegistration::of::<$ty_name>());
+            )*})
+        }
         register_all!(
-            Foo, Bar, A, B, C, D, E, bool, f64, f32, i8, i16, i32, i64, i128, isize, u8, u16, u32,
-            u64, u128, usize, String,
+            Foo, Bar, A, B, C, D, E, F, bool, f64, f32, i8, i16, i32, i64, i128, isize, u8, u16,
+            u32, u64, u128, usize, String,
         );
+        register_more!((i128, f32, String, f32, u32), Option<u8>);
         let mut document: KdlDocument = text.parse().unwrap();
         let mut node = document.nodes_mut().pop().unwrap();
-        let reflected = dbg!(owned_visit::parse_node(&mut node, &registry));
-        let mut ret = T::default();
-        ret.apply(reflected.unwrap().as_ref());
-        ret
+        match visit::parse_node(&mut node, &registry) {
+            Ok(val) => {
+                let mut ret = T::default();
+                ret.apply(val.as_ref());
+                ret
+            }
+            Err(err) => {
+                panic!("{}", err.show_no_context())
+            }
+        }
     }
     #[test]
     fn test_component() {
@@ -119,32 +108,50 @@ mod test {
         let expected_bar = Bar(3.0);
         assert_eq!(parse_kdl::<Bar>(kdl_bar), expected_bar);
     }
+    #[rustfmt::skip]
     #[test]
     fn more_test() {
-        // TODO: in future rewrite, enable to level value types
-        // const E_F: &str = r#"E "E::Y";"#;
-        // assert_eq!(parse_kdl::<E>(E_F), E::Y);
+        // TODO: Enum variants n' stuff
+        // assert_eq!(parse_kdl::<E>("E \"Y\""), E::Y);
 
-        const D_F: &str = r#"D .x=10;"#;
-        assert_eq!(parse_kdl::<D>(D_F), D { x: 10 });
+        assert_eq!(parse_kdl::<D>("D .x=10;"), D { x: 10 });
+        assert_eq!(parse_kdl::<D>("D 10;"), D { x: 10 });
 
-        const C_F: &str = r#"C 22;"#;
-        assert_eq!(parse_kdl::<C>(C_F), C(22));
+        assert_eq!(parse_kdl::<C>("C 22.0;"), C(22.0));
+        assert_eq!(parse_kdl::<C>("C .0=22.0;"), C(22.0));
 
-        const B_F: &str = r#"B;"#;
-        assert_eq!(parse_kdl::<B>(B_F), B);
+        assert_eq!(parse_kdl::<B>("B"), B);
 
-        const A_F: &str = r#"A .x=3030 {
-            .d "D" .x=143;
-            .c "C" 444; 
-        }"#;
-        assert_eq!(
-            parse_kdl::<A>(A_F),
-            A {
-                x: 3030,
-                d: D { x: 143 },
-                c: C(444)
-            }
+        assert_eq!( // explicit declaration
+            parse_kdl::<A>("A .x=3030 { .d .x=140; .c 444.0;}"),
+            A { x: 3030, d: D { x: 140 }, c: C(444.0) }
         );
+        assert_eq!( // Anonymous declaration
+            parse_kdl::<A>("A 4144 { D .x=441; C 414.0;}"),
+            A { x: 4144, d: D { x: 441 }, c: C(414.0) }
+        );
+        assert_eq!( // Arbitrary order
+            parse_kdl::<A>("A .x=5151 { .c 515.0; .d 155; }"),
+            A { x: 5151, d: D { x: 155 }, c: C(515.0) }
+        );
+        let f = r#"
+        F {
+            .d -34234552 3943.13456 "I am a foo" 65431.25543243 0b101010101010101010101010;
+            .b 255;
+        } 
+        "#;
+        let f_v = F {
+            d: (-34234552, 3943.13456, "I am a foo".to_owned(), 65431.25543243, 0b101010101010101010101010),
+            b: Some(255),
+        };
+        assert_eq!(
+            parse_kdl::<F>(f), f_v
+        );
+
     }
+    // TODO: test the unhappy path
+    // assert_eq!( // Bad anonymous declaration
+    //     parse_kdl::<A>("A 5151 { C 515.0; D 155; }"),
+    //     A { x: 5151, d: D { x: 155 }, c: C(515.0) }
+    // );
 }

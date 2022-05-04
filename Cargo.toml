@@ -18,5 +18,10 @@ bevy_reflect = "0.8.0-dev"
 kdl = "4.1"
 nonmax = "0.5"
 
+[dev-dependencies]
+# For testing the hashmap reflection
+bevy_utils = "0.8.0-dev"
+
 [patch.crates-io]
 bevy_reflect = { path = "/home/gibonus/code/gitimpo/bevy-4042/crates/bevy_reflect"}
+bevy_utils = { path = "/home/gibonus/code/gitimpo/bevy-4042/crates/bevy_utils"}

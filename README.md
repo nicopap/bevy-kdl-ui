@@ -28,7 +28,14 @@ TODO:
 * Figure out how to deserialize integral numbers coherently (done)
 * Refactor owned_visit as to couple more tightly with TypeInfo and
   separate TupleStruct constructor from truct constructor
-  Also makes error reporting and type checking easier.
+  Also makes error reporting and type checking easier. (done)
+* handle top level value types (done)
+* Allow newtypes to be declared in "KdlValue" if it is wrapping something
+  that can
+* Add Vec & HashMap handling
+* ?? Spanned smart pointer that forces updating offset when accessing
+  a Kdl type
+* Handle Enum 
 * Load more than one node
 * proper span-based error reporting
 * detect and parse `fn` nodes
@@ -36,7 +43,6 @@ TODO:
 * Expand `fn` nodes in other nodes
 * add a `bundle` node so that it's possible to define multiple
   components at a time
-* Use smallvec crate
 * Add "kdl markers" to nodes spawned, so that it might be eventually
   possible to round-trip the world, for 
 * Read and add to assets the last node in the kdl file
