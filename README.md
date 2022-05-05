@@ -32,10 +32,12 @@ TODO:
 * handle top level value types (done)
 * Allow newtypes to be declared in "KdlValue" if it is wrapping something
   that can
-* Add Vec & HashMap handling
-* ?? Spanned smart pointer that forces updating offset when accessing
-  a Kdl type
-* Handle Enum 
+* Add Vec & HashMap handling (done)
+* Extend kdl-type match checking to everything (done)
+* ?? Enable usage of kdl type specifiers and checking against expected values
+* ?? Spanned smart pointer that forces updating offset when accessing a Kdl type
+* ?? Non-String Map access.
+* ?? Handle Enum
 * Load more than one node
 * proper span-based error reporting
 * detect and parse `fn` nodes

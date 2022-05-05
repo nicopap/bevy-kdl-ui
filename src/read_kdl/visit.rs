@@ -3,12 +3,13 @@ use std::fmt::{self, Write};
 use std::mem;
 
 use bevy_reflect::{
-    DynamicStruct, DynamicTuple, DynamicTupleStruct, Reflect, TypeIdentity, TypeInfo, TypeRegistry,
+    DynamicStruct, DynamicTuple, DynamicTupleStruct, Reflect, TypeIdentity, TypeInfo,
+    TypeRegistration, TypeRegistry,
 };
 use kdl::{KdlEntry, KdlNode, KdlValue};
 use thiserror::Error;
 
-use super::dyn_wrappers::{Anon, FieldError, FieldRef, Rw, RwStruct};
+use super::dyn_wrappers::{Anon, FieldError, FieldRef, HomoList, HomoMap, Rw, RwStruct};
 use super::DynRefl;
 
 /// Ways expectation algorithm can screw up.
@@ -24,10 +25,17 @@ pub enum ExpError {
     FieldError(#[from] FieldError),
     #[error("There is no such registered type: {0}")]
     NoSuchType(String),
+    // TODO: try remove this, seee what it does
     #[error("The type name was malformed: {0}")]
     MalformedType(String),
     #[error("Expected a value in first entry field for type: {0}, got nothing")]
-    NoValuesInNode(String),
+    NoValuesInNode(&'static str),
+    #[error("List cannot be declared using explicit positioning.")]
+    NamedListDeclaration,
+    #[error("Map items must be declared in the form `.field=value`.")]
+    UnnamedMapDeclaration,
+    #[error("Component names should never start with a dot.")]
+    BadComponentTypeName,
 }
 type ExpResult<T> = Result<T, ExpError>;
 
@@ -177,6 +185,13 @@ impl From<Vec<(usize, ExpError)>> for ParseErrors {
         Self { errors }
     }
 }
+impl From<ExpError> for ParseErrors {
+    fn from(error: ExpError) -> Self {
+        Self {
+            errors: vec![(0, error)],
+        }
+    }
+}
 impl ParseErrors {
     pub fn show_for(&self, _file: String) -> String {
         todo!()
@@ -187,6 +202,16 @@ impl ParseErrors {
             writeln!(&mut ret, "{offset}: {error}").unwrap();
         }
         ret
+    }
+}
+fn get_named<'r>(name: &str, reg: &'r TypeRegistry) -> ExpResult<Option<&'r TypeRegistration>> {
+    if name.starts_with('.') {
+        Ok(None)
+    } else {
+        reg.get_with_name(name)
+            .or_else(|| reg.get_with_short_name(name))
+            .map(Some)
+            .ok_or(ExpError::NoSuchType(name.to_owned()))
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
@@ -201,11 +226,8 @@ impl<'r> Context<'r> {
     fn parse_component(node: KdlNode, registry: &'r TypeRegistry) -> ParseResult<DynRefl> {
         let name = node.name().value();
         let offset = node.leading().map_or(0, |s| s.len());
-        let err = || vec![(offset, ExpError::NoSuchType(name.to_string()))];
-        let registration = registry
-            .get_with_name(name)
-            .or_else(|| registry.get_with_short_name(name))
-            .ok_or_else(err)?;
+        let err = || vec![(offset, ExpError::BadComponentTypeName)];
+        let registration = get_named(name, registry)?.ok_or_else(err)?;
 
         let mut ctx = Self {
             offset,
@@ -231,15 +253,13 @@ impl<'r> Context<'r> {
     {
         match wrapped(self) {
             Ok(v) => Some(v),
-            Err(err) => {
-                self.add_error(0, err.into());
-                None
-            }
+            Err(err) => self.add_error(0, err.into()),
         }
     }
-    fn add_error(&mut self, span: usize, error: ExpError) {
+    fn add_error<T>(&mut self, span: usize, error: ExpError) -> Option<T> {
         self.errors.push((self.offset, error));
         self.offset += span;
+        None
     }
     fn advance(&mut self, span: usize) {
         self.offset += span;
@@ -251,10 +271,7 @@ impl<'r> Context<'r> {
     {
         use FieldRef::Implicit;
         let field = entry.name().map_or(Implicit, FieldRef::from_ident);
-        let make_value = move |ty_id: &TypeIdentity| {
-            let ret = self.parse_value(ty_id, &mut entry);
-            ret
-        };
+        let make_value = move |ty_id: &TypeIdentity| self.parse_value(ty_id, &mut entry);
         acc.add_field(get(field)?, make_value)?;
         Ok(())
     }
@@ -262,32 +279,40 @@ impl<'r> Context<'r> {
     where
         T: RwStruct<Field = F>,
     {
-        use FieldRef::Implicit;
         let field = FieldRef::from_ident(node.name());
-        let expected_ty_name = matches!(field, Implicit).then(|| node.name().value().to_owned());
-        let make_value = move |ty_id: &TypeIdentity| {
-            // `unwrap`: the ty_id comes directly from the same registry.
-            let ty_info = self.registry.get(ty_id.type_id()).expect(ty_id.type_name());
-            let actual_ty_name = ty_info.short_name();
-            match expected_ty_name {
-                None => self.parse_type(ty_info.type_info(), node),
-                Some(expected) if expected == actual_ty_name => {
-                    self.parse_type(ty_info.type_info(), node)
+        let actual = get_named(node.name().value(), self.registry);
+        let make_value = move |expected_id: &TypeIdentity| {
+            let expected = self.registry.get(expected_id.type_id());
+            let no_such_expected = || ExpError::NoSuchType(expected_id.type_name().to_owned());
+            match (actual, expected) {
+                (Err(err), Some(expected)) => {
+                    self.add_error::<()>(0, err);
+                    self.parse_type(expected.type_info(), node)
                 }
-                Some(unmatched_expected) => {
+                (Err(err), None) => self.add_error(0, err),
+                (Ok(None), Some(expected)) => self.parse_type(expected.type_info(), node),
+                (Ok(Some(actual)), Some(expected)) if actual.type_id() == expected.type_id() => {
+                    self.parse_type(expected.type_info(), node)
+                }
+                (Ok(Some(bad_actual)), Some(expected)) => {
                     let err = ExpError::TypeMismatch {
-                        expected: unmatched_expected,
-                        actual: actual_ty_name.to_owned(),
+                        expected: expected.short_name().to_string(),
+                        actual: bad_actual.short_name().to_string(),
                     };
-                    self.add_error(0, err);
-                    None
+                    self.add_error::<()>(0, err);
+                    self.parse_type(bad_actual.type_info(), node)
                 }
+                (Ok(Some(bad_actual)), None) => {
+                    self.add_error::<()>(0, no_such_expected());
+                    self.parse_type(bad_actual.type_info(), node)
+                }
+                (Ok(None), None) => self.add_error(0, no_such_expected()),
             }
         };
         acc.add_field(get(field)?, make_value)?;
         Ok(())
     }
-    fn parse_node<F, O, T>(
+    fn parse_node<T, F, O>(
         &mut self,
         mut node: KdlNode,
         mut acc: T,
@@ -316,19 +341,37 @@ impl<'r> Context<'r> {
                 self.advance(value_len);
                 Some(reflected)
             }
-            Err(err) => {
-                self.add_error(value_len, err);
-                None
-            }
+            Err(err) => self.add_error(value_len, err),
         }
     }
     fn parse_type(&mut self, ty_info: &TypeInfo, mut node: KdlNode) -> Option<DynRefl> {
         use DeclarMode::{Anon as ModAnon, ByField};
-        use TypeInfo::{Struct, Tuple, TupleStruct, Value};
-        let name = node.name().value().to_string();
+        use TypeInfo::{List, Map, Struct, Tuple, TupleStruct, Value};
+        let kdl_node_name = node.name().value();
+        let kdl_type = get_named(kdl_node_name, self.registry);
+        let rust_type = ty_info.id();
+        match kdl_type {
+            Err(err) => self.add_error(0, err),
+            Ok(Some(kdl_type)) if kdl_type.type_id() != rust_type.type_id() => self.add_error(
+                0,
+                ExpError::TypeMismatch {
+                    expected: rust_type.type_name().to_string(),
+                    actual: kdl_type.name().to_string(),
+                },
+            ),
+            _ => Some(()),
+        };
+
         macro_rules! parse {
+            (@homogenous $accumulator:ident :: new ( $info:expr ), $getter:expr) => {{
+                // TODO: this should be using something we call the macro with, but currently
+                // we only call it with the i.item() and i.value() elements.
+                let name = rust_type.type_name().to_string();
+                self.parse_node(node, $accumulator::new(name, $info.clone()), $getter)
+            }};
             ($wrap:ident :: < $acc:ty >, $info:expr, $get:expr) => {{
                 let info = $info.iter().as_slice();
+                let name = $info.id().type_name().to_string();
                 self.parse_node(node, $wrap::<$acc, _, _>::new(name, info), $get)
             }};
         }
@@ -339,9 +382,13 @@ impl<'r> Context<'r> {
             (ByField, Struct(i)) => parse!(Rw::<DynamicStruct>, i, FieldRef::name),
             (ModAnon, TupleStruct(i)) => parse!(Anon::<DynamicTupleStruct>, i, |_| Ok(())),
             (ByField, TupleStruct(i)) => parse!(Rw::<DynamicTupleStruct>, i, FieldRef::pos),
-            (_, Value(_)) => self
+            (ModAnon, List(i)) => parse!(@homogenous HomoList::new(i.item()), |_|Ok(())),
+            (ByField, List(_)) => self.add_error(0, ExpError::NamedListDeclaration),
+            (ModAnon, Map(_)) => self.add_error(0, ExpError::UnnamedMapDeclaration),
+            (ByField, Map(i)) => parse!(@homogenous HomoMap::new(i.value()), FieldRef::name),
+            (_, Value(i)) => self
                 .error_resilient::<_, ExpError, _>(|s| {
-                    let err = ExpError::NoValuesInNode(name);
+                    let err = ExpError::NoValuesInNode(i.id().type_name());
                     let entry = node.entries_mut().get_mut(0).ok_or(err)?;
                     Ok(s.parse_value(ty_info.id(), entry))
                 })

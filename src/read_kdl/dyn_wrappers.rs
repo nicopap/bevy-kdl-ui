@@ -41,7 +41,8 @@ use std::marker::PhantomData;
 
 use super::DynRefl;
 use bevy_reflect::{
-    DynamicStruct, DynamicTuple, DynamicTupleStruct, NamedField, TypeIdentity, UnnamedField,
+    DynamicList, DynamicMap, DynamicStruct, DynamicTuple, DynamicTupleStruct, NamedField,
+    TypeIdentity, UnnamedField,
 };
 use kdl::KdlIdentifier;
 use nonmax::NonMaxU8;
@@ -72,6 +73,9 @@ impl Display for Position {
 pub enum FieldRef {
     Implicit,
     Positional(Position),
+    // TODO(PERF): this would save us SO MUCH allocation if this was &str.
+    // But the major issue I've never figured a clean way to deal properly
+    // with it in the `RwStruct` trait.
     Named(String),
 }
 impl fmt::Display for FieldRef {
@@ -144,10 +148,12 @@ pub enum FieldError {
     },
     #[error("Field `{0}` is declared multiple times.")]
     AlreadyExists(String),
-    #[error("Too many declared field for anonymous struct")]
-    OutOfBound,
+    #[error("{0} doesn't exist in specified struct")]
+    OutOfBound(String),
     #[error("The struct has {expected} fields, but only {actual} **valid** fields were declared")]
     FieldCountMismatch { expected: usize, actual: usize },
+    #[error("Tried to add value of wrong type to an homogenous list")]
+    NonHomoType,
 }
 
 /// Wraps a Dynamic* to set the fields in arbitrary order while
@@ -175,7 +181,7 @@ where
         }
     }
 }
-impl<'r, T, F: ?Sized, M> RwStruct for Rw<'r, T, F, M>
+impl<'r, T, F: ?Sized + fmt::Debug, M> RwStruct for Rw<'r, T, F, M>
 where
     T: SeqStruct<Field = F, Map = [M]>,
 {
@@ -185,7 +191,8 @@ where
     where
         T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>,
     {
-        let (pos, ty_id) = T::map(self.map, &field).ok_or(FieldError::OutOfBound)?;
+        let oob = || FieldError::OutOfBound(format!("{field:?}"));
+        let (pos, ty_id) = T::map(self.map, &field).ok_or_else(oob)?;
         if self.buffer.iter().any(|(p, _, _)| p == &pos) {
             return Err(FieldError::AlreadyExists(pos.to_string()));
         }
@@ -250,7 +257,8 @@ where
         T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>,
     {
         let idx = Position::new_u8(self.current);
-        let (field, ty_id) = T::unmap(self.map, idx).ok_or(FieldError::OutOfBound)?;
+        let oob = || FieldError::OutOfBound(format!("field .{idx}"));
+        let (field, ty_id) = T::unmap(self.map, idx).ok_or_else(oob)?;
         if let Some(value) = make_value(ty_id) {
             self.current += 1;
             self.inner.add(&field, value);
@@ -279,6 +287,78 @@ pub(super) trait RwStruct {
     where
         T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>;
     fn complete(self) -> Result<Self::Out, FieldError>;
+}
+/// A DynamicList with guarenteed type (mostly to be able to impl RwStruct on it).
+///
+/// Trying to add something of the wrong type to it will result in an error.
+pub(super) struct HomoList {
+    list: DynamicList,
+    ty: TypeIdentity,
+}
+impl HomoList {
+    // TODO(CLEAN): accept ListInfo as input, so that can do the
+    // fancy things in there
+    pub(super) fn new(name: String, ty: TypeIdentity) -> Self {
+        let mut list = DynamicList::default();
+        list.set_name(name);
+        Self { list, ty }
+    }
+}
+impl RwStruct for HomoList {
+    type Field = ();
+    type Out = DynamicList;
+    fn add_field<T2R>(&mut self, _field: Self::Field, make_value: T2R) -> Result<(), FieldError>
+    where
+        T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>,
+    {
+        if let Some(value) = make_value(&self.ty) {
+            self.list.push_box(value);
+            Ok(())
+        } else {
+            Err(FieldError::NonHomoType)
+        }
+    }
+    fn complete(self) -> Result<Self::Out, FieldError> {
+        Ok(self.list)
+    }
+}
+/// A DynamicMap with forced string keys and homogenous values.
+///
+/// This is mostly in order to fit a round peg in a square hole: I have this `RwStruct` and I'd
+/// rather write a mountain of code for each `DynamicFoo` that exists, so I proxy everything through
+/// `RwStruct` and do not bother to increase the API surface. The code is already massive for what
+/// little it does.
+pub(super) struct HomoMap {
+    map: DynamicMap,
+    ty: TypeIdentity,
+}
+impl HomoMap {
+    // TODO(CLEAN): accept MapInfo as input, so that can do the
+    // fancy things in there, less error-prone
+    pub(super) fn new(name: String, ty: TypeIdentity) -> Self {
+        let mut map = DynamicMap::default();
+        map.set_name(name);
+        Self { map, ty }
+    }
+}
+impl RwStruct for HomoMap {
+    type Field = Box<str>;
+    type Out = DynamicMap;
+    fn add_field<T2R>(&mut self, field: Self::Field, make_value: T2R) -> Result<(), FieldError>
+    where
+        T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>,
+    {
+        if let Some(value) = make_value(&self.ty) {
+            let string_field = field.into_string();
+            self.map.insert_boxed(Box::new(string_field), value);
+            Ok(())
+        } else {
+            Err(FieldError::NonHomoType)
+        }
+    }
+    fn complete(self) -> Result<Self::Out, FieldError> {
+        Ok(self.map)
+    }
 }
 
 /// A thing that can only be built sequentially.

@@ -10,23 +10,20 @@ pub(super) type DynRefl = Box<dyn Reflect>;
 mod test {
     use super::*;
     use bevy_reflect::{FromReflect, Reflect, TypeRegistration, TypeRegistry};
-    // use bevy_utils::HashMap;
+    use bevy_utils::HashMap;
     use kdl::KdlDocument;
 
-    #[derive(Reflect, Debug, PartialEq, Default)]
+    #[derive(Reflect, Debug, PartialEq, Default, FromReflect)]
     struct A {
         x: i32,
         d: D,
         c: C,
-        // TODO: figure out how to do those
-        // y: Vec<u32>,
-        // z: HashMap<String, f32>,
     }
 
-    #[derive(Reflect, Debug, PartialEq, Default)]
+    #[derive(Reflect, Debug, PartialEq, Default, FromReflect)]
     struct B;
 
-    #[derive(Reflect, Debug, PartialEq, Default)]
+    #[derive(Reflect, Debug, PartialEq, Default, FromReflect)]
     struct C(f32);
 
     #[derive(Clone, Reflect, Hash, PartialEq, Debug, Default, FromReflect)]
@@ -46,24 +43,30 @@ mod test {
             Self::X
         }
     }
-    #[derive(PartialEq, Reflect, Default, Debug)]
+    #[derive(FromReflect, PartialEq, Reflect, Default, Debug)]
     #[reflect(PartialEq)]
-    // TODO: Vec<D>
     struct F {
         b: Option<u8>,
         d: (i128, f32, String, f32, u32),
     }
 
-    #[derive(PartialEq, Clone, Reflect, Default, Debug)]
+    // TODO: Vec<complex struct>
+    #[derive(PartialEq, Reflect, Default, Debug, FromReflect)]
+    #[reflect(PartialEq)]
+    struct G {
+        y: Vec<String>,
+        z: HashMap<String, f32>,
+    }
+    #[derive(PartialEq, Clone, Reflect, Default, Debug, FromReflect)]
     #[reflect(PartialEq)]
     struct Foo {
         bar: i64,
         baz: String,
     }
-    #[derive(Clone, PartialEq, Reflect, Default, Debug)]
+    #[derive(Clone, PartialEq, Reflect, Default, Debug, FromReflect)]
     #[reflect(PartialEq)]
     struct Bar(f64);
-    fn parse_kdl<T: Default + Reflect>(text: &str) -> T {
+    fn parse_kdl<T: FromReflect>(text: &str) -> T {
         let mut registry = TypeRegistry::default();
         macro_rules! register_all {
             ($($ty_name:ty ),* $(,)? ) => ({$(
@@ -76,18 +79,14 @@ mod test {
             )*})
         }
         register_all!(
-            Foo, Bar, A, B, C, D, E, F, bool, f64, f32, i8, i16, i32, i64, i128, isize, u8, u16,
+            Foo, Bar, A, B, C, D, E, F, G, bool, f64, f32, i8, i16, i32, i64, i128, isize, u8, u16,
             u32, u64, u128, usize, String,
         );
-        register_more!((i128, f32, String, f32, u32), Option<u8>);
+        register_more!((i128, f32, String, f32, u32), Option<u8>, Vec<String>, HashMap<String, f32>);
         let mut document: KdlDocument = text.parse().unwrap();
         let mut node = document.nodes_mut().pop().unwrap();
         match visit::parse_node(&mut node, &registry) {
-            Ok(val) => {
-                let mut ret = T::default();
-                ret.apply(val.as_ref());
-                ret
-            }
+            Ok(val) => T::from_reflect(val.as_ref()).unwrap(),
             Err(err) => {
                 panic!("{}", err.show_no_context())
             }
@@ -122,15 +121,18 @@ mod test {
 
         assert_eq!(parse_kdl::<B>("B"), B);
 
-        assert_eq!( // explicit declaration
+        assert_eq!(
+            // explicit declaration
             parse_kdl::<A>("A .x=3030 { .d .x=140; .c 444.0;}"),
             A { x: 3030, d: D { x: 140 }, c: C(444.0) }
         );
-        assert_eq!( // Anonymous declaration
+        assert_eq!(
+            // Anonymous declaration
             parse_kdl::<A>("A 4144 { D .x=441; C 414.0;}"),
             A { x: 4144, d: D { x: 441 }, c: C(414.0) }
         );
-        assert_eq!( // Arbitrary order
+        assert_eq!(
+            // Arbitrary order
             parse_kdl::<A>("A .x=5151 { .c 515.0; .d 155; }"),
             A { x: 5151, d: D { x: 155 }, c: C(515.0) }
         );
@@ -138,16 +140,30 @@ mod test {
         F {
             .d -34234552 3943.13456 "I am a foo" 65431.25543243 0b101010101010101010101010;
             .b 255;
-        } 
-        "#;
+        }"#;
         let f_v = F {
             d: (-34234552, 3943.13456, "I am a foo".to_owned(), 65431.25543243, 0b101010101010101010101010),
             b: Some(255),
         };
-        assert_eq!(
-            parse_kdl::<F>(f), f_v
-        );
-
+        assert_eq!(parse_kdl::<F>(f), f_v);
+        macro_rules! map {
+            ($($key:expr => $value:expr),*$(,)?) => ({
+                let mut ret = HashMap::default();
+                $(ret.insert($key.to_owned(), $value);)*
+                ret
+            })
+        }       
+        let g = r#"
+        G {
+            .y "hello" "this" "is" "a" "series" "of" "worlds";
+            .z .pi=3.14 .e=2.7182818 .tau=6.28 .ln2=0.69314; 
+        } 
+        "#;
+        let g_v = G {
+            y: vec!["hello".to_owned(), "this".to_owned(), "is".to_owned(), "a".to_owned(), "series".to_owned(), "of".to_owned(), "worlds".to_owned()],
+            z: map!{"pi" => 3.14, "e" => 2.7182818, "tau" => 6.28, "ln2" => 0.69314},
+        };
+        assert_eq!(parse_kdl::<G>(g), g_v);
     }
     // TODO: test the unhappy path
     // assert_eq!( // Bad anonymous declaration
