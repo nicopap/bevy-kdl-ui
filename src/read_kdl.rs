@@ -20,7 +20,7 @@ mod test {
         c: C,
     }
 
-    #[derive(Reflect, Debug, PartialEq, Default, FromReflect)]
+    #[derive(Reflect, Debug, PartialEq, Clone, Copy, Default, FromReflect)]
     struct B;
 
     #[derive(Reflect, Debug, PartialEq, Default, FromReflect)]
@@ -60,6 +60,7 @@ mod test {
     #[derive(PartialEq, Clone, Reflect, Default, Debug, FromReflect)]
     #[reflect(PartialEq)]
     struct Foo {
+        xo: B,
         bar: i64,
         baz: String,
     }
@@ -95,11 +96,16 @@ mod test {
     #[test]
     fn test_component() {
         // for struct-type components
-        let kdl_foo = r#"Foo .bar=1034 .baz="hello";"#;
+        let kdl_foo = r#"Foo .bar=1034 .baz="hello" .xo="B";"#;
         let expected_foo = Foo {
             bar: 1034,
             baz: "hello".to_owned(),
+            xo: B,
         };
+        assert_eq!(parse_kdl::<Foo>(kdl_foo), expected_foo);
+
+        // Anonymous access (with marker components)
+        let kdl_foo = r#"Foo "B" 1034 "hello";"#;
         assert_eq!(parse_kdl::<Foo>(kdl_foo), expected_foo);
 
         // For tuple-type components
@@ -135,6 +141,11 @@ mod test {
             // Arbitrary order
             parse_kdl::<A>("A .x=5151 { .c 515.0; .d 155; }"),
             A { x: 5151, d: D { x: 155 }, c: C(515.0) }
+        );
+        assert_eq!(
+            // value type casting
+            parse_kdl::<A>("A .x=6161 .c=616.0 .d=16;"),
+            A { x: 6161, d: D { x: 16 }, c: C(616.0) }
         );
         let f = r#"
         F {

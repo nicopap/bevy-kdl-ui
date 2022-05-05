@@ -31,15 +31,15 @@ TODO:
   Also makes error reporting and type checking easier. (done)
 * handle top level value types (done)
 * Allow newtypes to be declared in "KdlValue" if it is wrapping something
-  that can
+  that can (done)
 * Add Vec & HashMap handling (done)
 * Extend kdl-type match checking to everything (done)
+* proper span-based error reporting
 * ?? Enable usage of kdl type specifiers and checking against expected values
 * ?? Spanned smart pointer that forces updating offset when accessing a Kdl type
 * ?? Non-String Map access.
 * ?? Handle Enum
 * Load more than one node
-* proper span-based error reporting
 * detect and parse `fn` nodes
 * Expand `fn` nodes in the last node of file
 * Expand `fn` nodes in other nodes

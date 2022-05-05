@@ -252,6 +252,13 @@ where
     type Field = ();
     type Out = T;
 
+    /// Add directly a new anonymous field to the wrapped `DynamicFoo`
+    ///
+    /// Note that if `make_value` fails, the value is not added but counted
+    /// "as if" it was, when doing the final field count check in [`Self::complete`].
+    ///
+    /// It is the responsibility of the user that if `make_value` returns a None, a
+    /// corresponding error is registered in the calling code.
     fn add_field<T2R>(&mut self, (): Self::Field, make_value: T2R) -> Result<(), FieldError>
     where
         T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>,
@@ -259,8 +266,8 @@ where
         let idx = Position::new_u8(self.current);
         let oob = || FieldError::OutOfBound(format!("field .{idx}"));
         let (field, ty_id) = T::unmap(self.map, idx).ok_or_else(oob)?;
+        self.current += 1;
         if let Some(value) = make_value(ty_id) {
-            self.current += 1;
             self.inner.add(&field, value);
         };
         Ok(())

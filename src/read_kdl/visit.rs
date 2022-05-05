@@ -43,6 +43,7 @@ pub fn parse_node(node: &mut KdlNode, reg: &TypeRegistry) -> ParseResult<DynRefl
     let my_node = mem::replace(node, KdlNode::new("foo"));
     Context::parse_component(my_node, reg)
 }
+/// A proxy for [`KdlValue`] that doesn't care about the format of declaration.
 enum KdlConcrete {
     Int(i64),
     Float(f64),
@@ -76,12 +77,82 @@ impl fmt::Display for KdlConcrete {
     }
 }
 impl KdlConcrete {
-    fn into_dyn_id(self, ty_id: &TypeIdentity) -> ExpResult<DynRefl> {
-        use KdlConcrete::*;
-        let mismatch = |this: Self| ExpError::TypeMismatch {
-            expected: ty_id.type_name().to_owned(),
-            actual: this.to_string(),
+    /// Try to get a Box<dyn Reflect> corresponding to provided `handle` type from this
+    /// [`KdlConcrete`].
+    ///
+    /// Inspects recursively newtype-style structs (aka structs will a single field) if
+    /// `handle` proves to be such a thing.
+    ///
+    /// This is useful to inline in entry position newtype struct.
+    fn dyn_value(self, handle: &TypeIdentity, reg: &TypeRegistry) -> ExpResult<DynRefl> {
+        self.dyn_value_newtypes(handle, reg, Vec::new())
+    }
+    /// Recursively resolves newtype structs attempting to summarize them into a primitive
+    /// type.
+    fn dyn_value_newtypes(
+        self,
+        handle: &TypeIdentity,
+        reg: &TypeRegistry,
+        mut wrappers: Vec<&'static str>,
+    ) -> ExpResult<DynRefl> {
+        use TypeInfo::{Struct, Tuple, TupleStruct, Value};
+        wrappers.push(handle.type_name());
+        let mismatch = |actual| {
+            || ExpError::TypeMismatch {
+                expected: if wrappers.len() == 1 {
+                    format!("{}", wrappers[0])
+                } else {
+                    format!("any of {}", wrappers.join(", "))
+                },
+                actual,
+            }
         };
+        macro_rules! create_dynamic {
+            (@insert DynamicStruct, $field:expr, $ret:expr, $val:expr) => (
+                $ret.insert_boxed($field.name(), $val)
+            );
+            (@insert $_1:ident, $_2:expr, $ret:expr, $val:expr) => ( $ret.insert_boxed($val) );
+            ($dynamic_kind:ident, $info:expr) => {{
+                // unwrap: we just checked that length == 1
+                let field = $info.field_at(0).unwrap();
+                let field_value = self.dyn_value_newtypes(field.id(), reg, wrappers)?;
+                let mut ret = $dynamic_kind::default();
+                ret.set_name(handle.type_name().to_string());
+                create_dynamic!(@insert $dynamic_kind, field, ret, field_value);
+                Ok(Box::new(ret))
+            }}
+        }
+        match reg.get_type_info(handle.type_id()) {
+            None => Err(ExpError::NoSuchType(handle.type_name().to_string())),
+            Some(Struct(info)) if info.field_len() == 0 => {
+                match (self, reg.get(handle.type_id())) {
+                    (Self::Str(s), Some(reg)) if reg.short_name() == s || reg.name() == s => {
+                        let mut ret = DynamicStruct::default();
+                        ret.set_name(handle.type_name().to_string());
+                        Ok(Box::new(ret))
+                    }
+                    (_, None) => Err(ExpError::NoSuchType(handle.type_name().to_string())),
+                    (s, Some(_)) => Err(mismatch(s.to_string())()),
+                }
+            }
+            Some(Struct(i)) if i.field_len() == 1 => create_dynamic!(DynamicStruct, i),
+            Some(Tuple(i)) if i.field_len() == 1 => create_dynamic!(DynamicTuple, i),
+            Some(TupleStruct(i)) if i.field_len() == 1 => create_dynamic!(DynamicTupleStruct, i),
+            Some(Value(info)) => {
+                let mismatch = mismatch(self.to_string());
+                self.into_dyn_by_id(info.id(), mismatch)
+            }
+            Some(_) => Err(mismatch(self.to_string())()),
+        }
+    }
+    /// Converts a raw primitive type into `Box<dyn Reflect>`, making sure they have
+    /// the same type as the `handle` provides.
+    fn into_dyn_by_id(
+        self,
+        handle: &TypeIdentity,
+        mismatch: impl FnOnce() -> ExpError,
+    ) -> ExpResult<DynRefl> {
+        use KdlConcrete::*;
         macro_rules! int2dyn {
             ($int_type:ty, $int_value:expr) => {
                 <$int_type>::try_from($int_value)
@@ -102,7 +173,7 @@ impl KdlConcrete {
         }
         let msg = "null values currently cannot be converted into rust types";
         let unsupported = Err(ExpError::GenericUnsupported(msg));
-        match (self, ty_id.type_id()) {
+        match (self, handle.type_id()) {
             (Int(i), ty) if id_eq!(ty, i8) => int2dyn!(i8, i),
             (Int(i), ty) if id_eq!(ty, i16) => int2dyn!(i16, i),
             (Int(i), ty) if id_eq!(ty, i32) => int2dyn!(i32, i),
@@ -127,18 +198,18 @@ impl KdlConcrete {
             (Int(i), ty) if id_eq!(ty, Option<u64>) => int2dyn_opt!(u64, i),
             (Int(i), ty) if id_eq!(ty, Option<u128>) => int2dyn_opt!(u128, i),
             (Int(i), ty) if id_eq!(ty, Option<usize>) => int2dyn_opt!(usize, i),
-            (this @ Int(_), _) => Err(mismatch(this)),
+            (Int(_), _) => Err(mismatch()),
             (Float(f), ty) if id_eq!(ty, f32) => Ok(Box::new(f as f32)), // TODO: fishy!
             (Float(f), ty) if id_eq!(ty, f64) => Ok(Box::new(f)),
             (Float(f), ty) if id_eq!(ty, Option<f32>) => Ok(Box::new(Some(f as f32))), // TODO: fishy!
             (Float(f), ty) if id_eq!(ty, Option<f64>) => Ok(Box::new(Some(f))),
-            (this @ Float(_), _) => Err(mismatch(this)),
+            (Float(_), _) => Err(mismatch()),
             (Bool(b), ty) if id_eq!(ty, bool) => Ok(Box::new(b)),
             (Bool(b), ty) if id_eq!(ty, Option<bool>) => Ok(Box::new(Some(b))),
-            (this @ Bool(_), _) => Err(mismatch(this)),
+            (Bool(_), _) => Err(mismatch()),
             (Str(s), ty) if id_eq!(ty, String) => Ok(Box::new(s)),
             (Str(s), ty) if id_eq!(ty, Option<String>) => Ok(Box::new(Some(s))),
-            (this @ Str(_), _) => Err(mismatch(this)),
+            (Str(_), _) => Err(mismatch()),
 
             (Null, _) => unsupported,
         }
@@ -336,7 +407,7 @@ impl<'r> Context<'r> {
     fn parse_value(&mut self, expected: &TypeIdentity, entry: &mut KdlEntry) -> Option<DynRefl> {
         let value_len = entry.value_repr().map_or(0, |s| s.len());
         let value = mem::replace(entry.value_mut(), KdlValue::Null);
-        match KdlConcrete::from(value).into_dyn_id(expected) {
+        match KdlConcrete::from(value).dyn_value(expected, self.registry) {
             Ok(reflected) => {
                 self.advance(value_len);
                 Some(reflected)
