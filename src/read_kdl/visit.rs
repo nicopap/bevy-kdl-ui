@@ -1,15 +1,16 @@
 use std::any::{self, TypeId};
 use std::fmt::{self, Write};
-use std::mem;
 
 use bevy_reflect::{
     DynamicStruct, DynamicTuple, DynamicTupleStruct, Reflect, TypeIdentity, TypeInfo,
     TypeRegistration, TypeRegistry,
 };
-use kdl::{KdlEntry, KdlNode, KdlValue};
+use kdl::{KdlNode, KdlValue};
 use thiserror::Error;
 
 use super::dyn_wrappers::{Anon, FieldError, FieldRef, HomoList, HomoMap, Rw, RwStruct};
+use super::kdl_spans::{SpannedEntry, SpannedNode};
+use super::span::Span;
 use super::DynRefl;
 
 /// Ways expectation algorithm can screw up.
@@ -39,9 +40,9 @@ pub enum ExpError {
 }
 type ExpResult<T> = Result<T, ExpError>;
 
-pub fn parse_node(node: &mut KdlNode, reg: &TypeRegistry) -> ParseResult<DynRefl> {
-    let my_node = mem::replace(node, KdlNode::new("foo"));
-    Context::parse_component(my_node, reg)
+pub fn parse_node(node: &KdlNode, reg: &TypeRegistry) -> ParseResult<DynRefl> {
+    let spanned = SpannedNode::new(node, 0);
+    Context::parse_component(spanned, reg)
 }
 /// A proxy for [`KdlValue`] that doesn't care about the format of declaration.
 enum KdlConcrete {
@@ -100,7 +101,7 @@ impl KdlConcrete {
         let mismatch = |actual| {
             || ExpError::TypeMismatch {
                 expected: if wrappers.len() == 1 {
-                    format!("{}", wrappers[0])
+                    wrappers[0].to_string()
                 } else {
                     format!("any of {}", wrappers.join(", "))
                 },
@@ -216,48 +217,35 @@ enum DeclarMode {
     Anon,
     ByField,
 }
-impl DeclarMode {
-    /// The style of declaration used in specified node.
-    ///
-    /// NOTE: if there is no fields, uses `Anon`. Empty struct (marker components)
-    /// should be navigable.
-    #[allow(unused_parens)]
-    fn of_node(node: &KdlNode) -> DeclarMode {
-        use DeclarMode::{Anon, ByField};
-        let ident_mode = |ident| {
-            let is_anon = FieldRef::from_ident(ident).anon().is_ok();
-            (if is_anon { Anon } else { ByField })
-        };
-        let entry = node.entries().first();
-        let inner = node.children().and_then(|doc| doc.nodes().first());
-        entry
-            .map(|e| e.name().map_or(Anon, ident_mode))
-            .or_else(|| inner.map(|n| ident_mode(n.name())))
-            .unwrap_or(Anon)
-    }
-}
 
 type FieldF<F> = fn(FieldRef) -> Result<F, FieldError>;
 
 #[derive(Debug)]
 pub struct ParseErrors {
-    errors: Vec<(usize, ExpError)>,
+    errors: Vec<(Span, ExpError)>,
 }
-impl From<Vec<(usize, ExpError)>> for ParseErrors {
-    fn from(errors: Vec<(usize, ExpError)>) -> Self {
+impl From<Vec<(Span, ExpError)>> for ParseErrors {
+    fn from(errors: Vec<(Span, ExpError)>) -> Self {
         Self { errors }
     }
 }
-impl From<ExpError> for ParseErrors {
-    fn from(error: ExpError) -> Self {
-        Self {
-            errors: vec![(0, error)],
-        }
-    }
-}
 impl ParseErrors {
-    pub fn show_for(&self, _file: String) -> String {
-        todo!()
+    pub fn show_for(&self, file: &str) -> String {
+        let mut ret = String::with_capacity(self.errors.len() * 160);
+        for (offset, error) in &self.errors {
+            ret.push('\n');
+            ret.push_str(&file);
+            writeln!(
+                &mut ret,
+                "\n{x: >off$}{x:->siz$}",
+                off = offset.offset as usize,
+                siz = offset.size as usize,
+                x = ""
+            )
+            .unwrap();
+            writeln!(&mut ret, "\nat {}: {error}", offset.offset).unwrap();
+        }
+        ret
     }
     pub fn show_no_context(&self) -> String {
         let mut ret = String::with_capacity(self.errors.len() * 80);
@@ -280,29 +268,38 @@ fn get_named<'r>(name: &str, reg: &'r TypeRegistry) -> ExpResult<Option<&'r Type
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Offset(usize);
 struct Context<'r> {
-    offset: usize,
-    errors: Vec<(usize, ExpError)>,
+    span: Span,
+    errors: Vec<(Span, ExpError)>,
     registry: &'r TypeRegistry,
 }
 pub type ParseResult<T> = Result<T, ParseErrors>;
 impl<'r> Context<'r> {
-    fn parse_component(node: KdlNode, registry: &'r TypeRegistry) -> ParseResult<DynRefl> {
-        let name = node.name().value();
-        let offset = node.leading().map_or(0, |s| s.len());
-        let err = || vec![(offset, ExpError::BadComponentTypeName)];
-        let registration = get_named(name, registry)?.ok_or_else(err)?;
+    fn parse_component(node: SpannedNode, registry: &'r TypeRegistry) -> ParseResult<DynRefl> {
+        let (span, name) = node.name();
+        let mut ctx = Self { span, errors: Vec::new(), registry };
+        let err = || vec![(span, ExpError::BadComponentTypeName)];
+        let registration = get_named(name.value(), registry)
+            .map_err(|e| vec![(span, e)])?
+            .ok_or_else(err)?;
 
-        let mut ctx = Self {
-            offset,
-            errors: Vec::new(),
-            registry,
-        };
         let ty_info = registration.type_info();
-        let result = ctx.parse_type(ty_info, node);
+        let result = ctx.dyn_compound(ty_info, node);
         (ctx.errors.is_empty())
             .then(|| result)
             .flatten()
             .ok_or_else(|| ctx.errors.into())
+    }
+    fn read_span<T>(&mut self, (span, t): (Span, T)) -> T {
+        self.span = span;
+        t
+    }
+    fn read_span_opt<T>(&mut self, spanned: Option<(Span, T)>) -> Option<T> {
+        if let Some((span, t)) = spanned {
+            self.span = span;
+            Some(t)
+        } else {
+            None
+        }
     }
     /// Wrap a failable closure so that we  can continue walking the rest
     /// of the tree checking for other errors.
@@ -316,148 +313,159 @@ impl<'r> Context<'r> {
     {
         match wrapped(self) {
             Ok(v) => Some(v),
-            Err(err) => self.add_error(0, err.into()),
+            Err(err) => self.add_error(err.into()),
         }
     }
-    fn add_error<T>(&mut self, span: usize, error: ExpError) -> Option<T> {
-        self.errors.push((self.offset, error));
-        self.offset += span;
+    fn add_error<T>(&mut self, error: ExpError) -> Option<T> {
+        self.errors.push((self.span, error));
         None
     }
-    fn advance(&mut self, span: usize) {
-        self.offset += span;
-    }
 
-    fn entry2dyn<F, T>(&mut self, mut entry: KdlEntry, acc: &mut T, get: FieldF<F>) -> ExpResult<()>
+    fn entry2dyn<F, T>(&mut self, entry: SpannedEntry, acc: &mut T, get: FieldF<F>) -> ExpResult<()>
     where
         T: RwStruct<Field = F>,
     {
         use FieldRef::Implicit;
-        let field = entry.name().map_or(Implicit, FieldRef::from_ident);
-        let make_value = move |ty_id: &TypeIdentity| self.parse_value(ty_id, &mut entry);
+        let field = self
+            .read_span_opt(entry.name())
+            .map_or(Implicit, FieldRef::from_ident);
+        let make_value = move |ty_id: &TypeIdentity| self.dyn_value(ty_id, entry);
         acc.add_field(get(field)?, make_value)?;
         Ok(())
     }
-    fn node2dyn<F, T>(&mut self, node: KdlNode, acc: &mut T, get: FieldF<F>) -> ExpResult<()>
+    fn node2dyn<F, T>(&mut self, node: SpannedNode, acc: &mut T, get: FieldF<F>) -> ExpResult<()>
     where
         T: RwStruct<Field = F>,
     {
-        let field = FieldRef::from_ident(node.name());
-        let actual = get_named(node.name().value(), self.registry);
+        let name = self.read_span(node.name());
+        let field = FieldRef::from_ident(name);
+        let actual = get_named(name.value(), self.registry);
         let make_value = move |expected_id: &TypeIdentity| {
             let expected = self.registry.get(expected_id.type_id());
             let no_such_expected = || ExpError::NoSuchType(expected_id.type_name().to_owned());
-            match (actual, expected) {
+            let field_expected_ty = match (actual, expected) {
                 (Err(err), Some(expected)) => {
-                    self.add_error::<()>(0, err);
-                    self.parse_type(expected.type_info(), node)
+                    self.add_error::<()>(err);
+                    expected
                 }
-                (Err(err), None) => self.add_error(0, err),
-                (Ok(None), Some(expected)) => self.parse_type(expected.type_info(), node),
-                (Ok(Some(actual)), Some(expected)) if actual.type_id() == expected.type_id() => {
-                    self.parse_type(expected.type_info(), node)
-                }
+                (Err(err), None) => return self.add_error(err),
+                (Ok(None), Some(expected)) => expected,
+                (Ok(Some(actu)), Some(expect)) if actu.type_id() == expect.type_id() => expect,
                 (Ok(Some(bad_actual)), Some(expected)) => {
-                    let err = ExpError::TypeMismatch {
+                    self.add_error::<()>(ExpError::TypeMismatch {
                         expected: expected.short_name().to_string(),
                         actual: bad_actual.short_name().to_string(),
-                    };
-                    self.add_error::<()>(0, err);
-                    self.parse_type(bad_actual.type_info(), node)
+                    });
+                    bad_actual
                 }
                 (Ok(Some(bad_actual)), None) => {
-                    self.add_error::<()>(0, no_such_expected());
-                    self.parse_type(bad_actual.type_info(), node)
+                    self.add_error::<()>(no_such_expected());
+                    bad_actual
                 }
-                (Ok(None), None) => self.add_error(0, no_such_expected()),
-            }
+                (Ok(None), None) => return self.add_error(no_such_expected()),
+            };
+            self.dyn_compound(field_expected_ty.type_info(), node)
         };
         acc.add_field(get(field)?, make_value)?;
         Ok(())
     }
-    fn parse_node<T, F, O>(
+    fn read_fields_into<T, F, O>(
         &mut self,
-        mut node: KdlNode,
         mut acc: T,
+        node: SpannedNode,
         get: FieldF<F>,
     ) -> Option<DynRefl>
     where
         O: Reflect + Sized,
         T: RwStruct<Field = F, Out = O>,
     {
-        for entry in node.entries_mut().drain(..) {
+        for entry in self.read_span(node.entries()) {
             self.error_resilient(|s| s.entry2dyn(entry, &mut acc, get));
         }
-        if let Some(mut nodes) = node.children_mut().take() {
-            for inner in nodes.nodes_mut().drain(..) {
+        if let Some(doc) = self.read_span_opt(node.children()) {
+            for inner in self.read_span(doc.nodes()) {
                 self.error_resilient(|s| s.node2dyn(inner, &mut acc, get));
             }
         }
         self.error_resilient(|_| acc.complete())
             .map(|v| Box::new(v) as DynRefl)
     }
-    fn parse_value(&mut self, expected: &TypeIdentity, entry: &mut KdlEntry) -> Option<DynRefl> {
-        let value_len = entry.value_repr().map_or(0, |s| s.len());
-        let value = mem::replace(entry.value_mut(), KdlValue::Null);
-        match KdlConcrete::from(value).dyn_value(expected, self.registry) {
-            Ok(reflected) => {
-                self.advance(value_len);
-                Some(reflected)
-            }
-            Err(err) => self.add_error(value_len, err),
+    fn dyn_value(&mut self, expected: &TypeIdentity, entry: SpannedEntry) -> Option<DynRefl> {
+        let value = self.read_span(entry.value());
+        match KdlConcrete::from(value.clone()).dyn_value(expected, self.registry) {
+            Ok(reflected) => Some(reflected),
+            Err(err) => self.add_error(err),
         }
     }
-    fn parse_type(&mut self, ty_info: &TypeInfo, mut node: KdlNode) -> Option<DynRefl> {
+    /// Build the dynamic compound value based on `node`, which should be of
+    /// type `ty_info`.
+    fn dyn_compound(&mut self, ty_info: &TypeInfo, node: SpannedNode) -> Option<DynRefl> {
         use DeclarMode::{Anon as ModAnon, ByField};
         use TypeInfo::{List, Map, Struct, Tuple, TupleStruct, Value};
-        let kdl_node_name = node.name().value();
-        let kdl_type = get_named(kdl_node_name, self.registry);
+        let node_name = self.read_span(node.name());
+        let kdl_type = get_named(node_name.value(), self.registry);
         let rust_type = ty_info.id();
         match kdl_type {
-            Err(err) => self.add_error(0, err),
-            Ok(Some(kdl_type)) if kdl_type.type_id() != rust_type.type_id() => self.add_error(
-                0,
-                ExpError::TypeMismatch {
+            Err(err) => self.add_error(err),
+            Ok(Some(kdl_type)) if kdl_type.type_id() != rust_type.type_id() => {
+                self.add_error(ExpError::TypeMismatch {
                     expected: rust_type.type_name().to_string(),
                     actual: kdl_type.name().to_string(),
-                },
-            ),
+                })
+            }
             _ => Some(()),
         };
-
-        macro_rules! parse {
+        macro_rules! make_dyn {
             (@homogenous $accumulator:ident :: new ( $info:expr ), $getter:expr) => {{
                 // TODO: this should be using something we call the macro with, but currently
                 // we only call it with the i.item() and i.value() elements.
                 let name = rust_type.type_name().to_string();
-                self.parse_node(node, $accumulator::new(name, $info.clone()), $getter)
+                self.read_fields_into($accumulator::new(name, $info.clone()), node, $getter)
             }};
             ($wrap:ident :: < $acc:ty >, $info:expr, $get:expr) => {{
                 let info = $info.iter().as_slice();
                 let name = $info.id().type_name().to_string();
-                self.parse_node(node, $wrap::<$acc, _, _>::new(name, info), $get)
+                self.read_fields_into($wrap::<$acc, _, _>::new(name, info), node, $get)
             }};
         }
-        let ret = match (DeclarMode::of_node(&node), ty_info) {
-            (ModAnon, Tuple(i)) => parse!(Anon::<DynamicTuple>, i, |_| Ok(())),
-            (ByField, Tuple(i)) => parse!(Rw::<DynamicTuple>, i, FieldRef::pos),
-            (ModAnon, Struct(i)) => parse!(Anon::<DynamicStruct>, i, |_| Ok(())),
-            (ByField, Struct(i)) => parse!(Rw::<DynamicStruct>, i, FieldRef::name),
-            (ModAnon, TupleStruct(i)) => parse!(Anon::<DynamicTupleStruct>, i, |_| Ok(())),
-            (ByField, TupleStruct(i)) => parse!(Rw::<DynamicTupleStruct>, i, FieldRef::pos),
-            (ModAnon, List(i)) => parse!(@homogenous HomoList::new(i.item()), |_|Ok(())),
-            (ByField, List(_)) => self.add_error(0, ExpError::NamedListDeclaration),
-            (ModAnon, Map(_)) => self.add_error(0, ExpError::UnnamedMapDeclaration),
-            (ByField, Map(i)) => parse!(@homogenous HomoMap::new(i.value()), FieldRef::name),
+        match (self.declar_of_node(node), ty_info) {
+            (ModAnon, Tuple(i)) => make_dyn!(Anon::<DynamicTuple>, i, |_| Ok(())),
+            (ByField, Tuple(i)) => make_dyn!(Rw::<DynamicTuple>, i, FieldRef::pos),
+            (ModAnon, Struct(i)) => make_dyn!(Anon::<DynamicStruct>, i, |_| Ok(())),
+            (ByField, Struct(i)) => make_dyn!(Rw::<DynamicStruct>, i, FieldRef::name),
+            (ModAnon, TupleStruct(i)) => make_dyn!(Anon::<DynamicTupleStruct>, i, |_| Ok(())),
+            (ByField, TupleStruct(i)) => make_dyn!(Rw::<DynamicTupleStruct>, i, FieldRef::pos),
+            (ModAnon, List(i)) => make_dyn!(@homogenous HomoList::new(i.item()), |_|Ok(())),
+            (ByField, List(_)) => self.add_error(ExpError::NamedListDeclaration),
+            (ModAnon, Map(_)) => self.add_error(ExpError::UnnamedMapDeclaration),
+            (ByField, Map(i)) => make_dyn!(@homogenous HomoMap::new(i.value()), FieldRef::name),
             (_, Value(i)) => self
                 .error_resilient::<_, ExpError, _>(|s| {
                     let err = ExpError::NoValuesInNode(i.id().type_name());
-                    let entry = node.entries_mut().get_mut(0).ok_or(err)?;
-                    Ok(s.parse_value(ty_info.id(), entry))
+                    let entries = s.read_span(node.entries()).next().ok_or(err)?;
+                    Ok(s.dyn_value(ty_info.id(), entries))
                 })
                 .flatten(),
-            unsupported => todo!("implement top level parsing for: {unsupported:?}"),
+            unsupported => todo!("implement parsing for: {unsupported:?}"),
+        }
+    }
+    /// The style of declaration used in specified node.
+    ///
+    /// NOTE: if there is no fields, uses `Anon`. Empty struct (marker components)
+    /// should be navigable.
+    #[allow(unused_parens)]
+    fn declar_of_node(&mut self, node: SpannedNode) -> DeclarMode {
+        use DeclarMode::{Anon, ByField};
+        let ident_mode = |ident| {
+            let is_anon = FieldRef::from_ident(ident).anon().is_ok();
+            (if is_anon { Anon } else { ByField })
         };
-        ret
+        let entry = self.read_span(node.entries()).next();
+        let doc = self.read_span_opt(node.children());
+        let first_node = doc.and_then(|d| self.read_span(d.nodes()).next());
+        entry
+            .map(|e| self.read_span_opt(e.name()).map_or(Anon, ident_mode))
+            .or_else(|| first_node.map(|n| ident_mode(self.read_span(n.name()))))
+            .unwrap_or(Anon)
     }
 }

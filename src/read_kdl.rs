@@ -1,6 +1,8 @@
 use bevy_reflect::Reflect;
 
 mod dyn_wrappers;
+mod kdl_spans;
+mod span;
 pub mod visit;
 
 pub(super) type DynRefl = Box<dyn Reflect>;
@@ -89,7 +91,7 @@ mod test {
         match visit::parse_node(&mut node, &registry) {
             Ok(val) => T::from_reflect(val.as_ref()).unwrap(),
             Err(err) => {
-                panic!("{}", err.show_no_context())
+                panic!("{}", err.show_for(text))
             }
         }
     }
@@ -97,11 +99,7 @@ mod test {
     fn test_component() {
         // for struct-type components
         let kdl_foo = r#"Foo .bar=1034 .baz="hello" .xo="B";"#;
-        let expected_foo = Foo {
-            bar: 1034,
-            baz: "hello".to_owned(),
-            xo: B,
-        };
+        let expected_foo = Foo { bar: 1034, baz: "hello".to_owned(), xo: B };
         assert_eq!(parse_kdl::<Foo>(kdl_foo), expected_foo);
 
         // Anonymous access (with marker components)

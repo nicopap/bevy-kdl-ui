@@ -99,27 +99,24 @@ impl FieldRef {
     pub(super) fn anon(self) -> Result<(), FieldError> {
         match self {
             Self::Implicit => Ok(()),
-            Self::Positional(_) | Self::Named(_) => Err(FieldError::WrongAccess {
-                expected: AccessType::Anon,
-                actual: self,
-            }),
+            Self::Positional(_) | Self::Named(_) => {
+                Err(FieldError::WrongAccess { expected: AccessType::Anon, actual: self })
+            }
         }
     }
     pub(super) fn pos(self) -> Result<Box<Position>, FieldError> {
         match self {
-            Self::Implicit | Self::Named(_) => Err(FieldError::WrongAccess {
-                expected: AccessType::Pos,
-                actual: self,
-            }),
+            Self::Implicit | Self::Named(_) => {
+                Err(FieldError::WrongAccess { expected: AccessType::Pos, actual: self })
+            }
             Self::Positional(n) => Ok(Box::new(n)),
         }
     }
     pub(super) fn name(self) -> Result<Box<str>, FieldError> {
         match self {
-            Self::Implicit | Self::Positional(_) => Err(FieldError::WrongAccess {
-                expected: AccessType::Named,
-                actual: self,
-            }),
+            Self::Implicit | Self::Positional(_) => {
+                Err(FieldError::WrongAccess { expected: AccessType::Named, actual: self })
+            }
             Self::Named(n) => Ok(n.into_boxed_str()),
         }
     }
@@ -173,12 +170,7 @@ where
     pub(super) fn new(name: String, map: &'r [M]) -> Self {
         let _ty = PhantomData;
         let buffer = Vec::new();
-        Rw {
-            buffer,
-            name,
-            map,
-            _ty,
-        }
+        Rw { buffer, name, map, _ty }
     }
 }
 impl<'r, T, F: ?Sized + fmt::Debug, M> RwStruct for Rw<'r, T, F, M>
@@ -203,9 +195,7 @@ where
     }
     fn complete(self) -> Result<T, FieldError> {
         if self.buffer.len() == self.map.len() {
-            let Self {
-                name, mut buffer, ..
-            } = self;
+            let Self { name, mut buffer, .. } = self;
             let mut ret = T::default();
             ret.set_name(name);
             buffer.sort_unstable_by_key(|p| p.0);
@@ -237,12 +227,7 @@ where
         let mut inner = T::default();
         inner.set_name(name);
         let _f = PhantomData;
-        Self {
-            inner,
-            map,
-            current: 0,
-            _f,
-        }
+        Self { inner, map, current: 0, _f }
     }
 }
 impl<'r, T, F: ?Sized, M> RwStruct for Anon<'r, T, F, M>

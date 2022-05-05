@@ -34,11 +34,10 @@ TODO:
   that can (done)
 * Add Vec & HashMap handling (done)
 * Extend kdl-type match checking to everything (done)
-* proper span-based error reporting
-* ?? Enable usage of kdl type specifiers and checking against expected values
-* ?? Spanned smart pointer that forces updating offset when accessing a Kdl type
-* ?? Non-String Map access.
-* ?? Handle Enum
+* Consider non-consuming parsing (after all, the only values we really copy are the
+  primitive types & strings, and we are already cloning them a bunch) (done??)
+* proper span-based error reporting (done)
+* Spanned smart pointer that forces updating offset when accessing a Kdl type (done)
 * Load more than one node
 * detect and parse `fn` nodes
 * Expand `fn` nodes in the last node of file
@@ -49,10 +48,12 @@ TODO:
   possible to round-trip the world, for 
 * Read and add to assets the last node in the kdl file
 * Check for `Added<Handle<Cuddly>>` and add scenes
+* ?? Enable usage of kdl type specifiers and checking against expected values
 * ?? type-directed field assignment (arbitrary ordering of fields in kdl file
   as long as it is possible to guess to which field a node element belongs based
   on either field name or type)
-* ?? feature-gate `bevy_text`
+* ?? Non-String Map access.
+* ?? Handle Enum
 
 ## Special nodes
 
