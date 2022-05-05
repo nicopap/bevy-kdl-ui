@@ -140,75 +140,67 @@ impl KdlConcrete {
             Some(TupleStruct(i)) if i.field_len() == 1 => create_dynamic!(DynamicTupleStruct, i),
             Some(Value(info)) => {
                 let mismatch = mismatch(self.to_string());
-                self.into_dyn_by_id(info.id(), mismatch)
+                self.dyn_primitive_value(info.id(), mismatch)
             }
             Some(_) => Err(mismatch(self.to_string())()),
         }
     }
     /// Converts a raw primitive type into `Box<dyn Reflect>`, making sure they have
     /// the same type as the `handle` provides.
-    fn into_dyn_by_id(
+    fn dyn_primitive_value(
         self,
         handle: &TypeIdentity,
         mismatch: impl FnOnce() -> ExpError,
     ) -> ExpResult<DynRefl> {
         use KdlConcrete::*;
         macro_rules! int2dyn {
+            (@opt $int_type:ty, $int_value:expr) => {{
+                Ok(Box::new(<$int_type>::try_from($int_value).ok()))
+            }};
             ($int_type:ty, $int_value:expr) => {
                 <$int_type>::try_from($int_value)
                     .map_err(|_| ExpError::IntError($int_value, any::type_name::<$int_type>()))
                     .map::<DynRefl, _>(|i| Box::new(i))
             };
         }
-        macro_rules! int2dyn_opt {
-            ($int_type:ty, $int_value:expr) => {{
-                let tried: Option<$int_type> = $int_value.try_into().ok();
-                Ok(Box::new(tried))
-            }};
-        }
-        macro_rules! id_eq {
-            ($what:expr, $to:ty) => {
-                $what == TypeId::of::<$to>()
-            };
-        }
         let msg = "null values currently cannot be converted into rust types";
         let unsupported = Err(ExpError::GenericUnsupported(msg));
         match (self, handle.type_id()) {
-            (Int(i), ty) if id_eq!(ty, i8) => int2dyn!(i8, i),
-            (Int(i), ty) if id_eq!(ty, i16) => int2dyn!(i16, i),
-            (Int(i), ty) if id_eq!(ty, i32) => int2dyn!(i32, i),
-            (Int(i), ty) if id_eq!(ty, i64) => Ok(Box::new(i)),
-            (Int(i), ty) if id_eq!(ty, i128) => int2dyn!(i128, i),
-            (Int(i), ty) if id_eq!(ty, isize) => int2dyn!(isize, i),
-            (Int(i), ty) if id_eq!(ty, u8) => int2dyn!(u8, i),
-            (Int(i), ty) if id_eq!(ty, u16) => int2dyn!(u16, i),
-            (Int(i), ty) if id_eq!(ty, u32) => int2dyn!(u32, i),
-            (Int(i), ty) if id_eq!(ty, u64) => int2dyn!(u64, i),
-            (Int(i), ty) if id_eq!(ty, u128) => int2dyn!(u128, i),
-            (Int(i), ty) if id_eq!(ty, usize) => int2dyn!(usize, i),
-            (Int(i), ty) if id_eq!(ty, Option<i8>) => int2dyn_opt!(i8, i),
-            (Int(i), ty) if id_eq!(ty, Option<i16>) => int2dyn_opt!(i16, i),
-            (Int(i), ty) if id_eq!(ty, Option<i32>) => int2dyn_opt!(i32, i),
-            (Int(i), ty) if id_eq!(ty, Option<i64>) => Ok(Box::new(Some(i))),
-            (Int(i), ty) if id_eq!(ty, Option<i128>) => int2dyn_opt!(i128, i),
-            (Int(i), ty) if id_eq!(ty, Option<isize>) => int2dyn_opt!(isize, i),
-            (Int(i), ty) if id_eq!(ty, Option<u8>) => int2dyn_opt!(u8, i),
-            (Int(i), ty) if id_eq!(ty, Option<u16>) => int2dyn_opt!(u16, i),
-            (Int(i), ty) if id_eq!(ty, Option<u32>) => int2dyn_opt!(u32, i),
-            (Int(i), ty) if id_eq!(ty, Option<u64>) => int2dyn_opt!(u64, i),
-            (Int(i), ty) if id_eq!(ty, Option<u128>) => int2dyn_opt!(u128, i),
-            (Int(i), ty) if id_eq!(ty, Option<usize>) => int2dyn_opt!(usize, i),
+            (Int(i), ty) if ty == TypeId::of::<i8>() => int2dyn!(i8, i),
+            (Int(i), ty) if ty == TypeId::of::<i16>() => int2dyn!(i16, i),
+            (Int(i), ty) if ty == TypeId::of::<i32>() => int2dyn!(i32, i),
+            (Int(i), ty) if ty == TypeId::of::<i64>() => Ok(Box::new(i)),
+            (Int(i), ty) if ty == TypeId::of::<i128>() => int2dyn!(i128, i),
+            (Int(i), ty) if ty == TypeId::of::<isize>() => int2dyn!(isize, i),
+            (Int(i), ty) if ty == TypeId::of::<u8>() => int2dyn!(u8, i),
+            (Int(i), ty) if ty == TypeId::of::<u16>() => int2dyn!(u16, i),
+            (Int(i), ty) if ty == TypeId::of::<u32>() => int2dyn!(u32, i),
+            (Int(i), ty) if ty == TypeId::of::<u64>() => int2dyn!(u64, i),
+            (Int(i), ty) if ty == TypeId::of::<u128>() => int2dyn!(u128, i),
+            (Int(i), ty) if ty == TypeId::of::<usize>() => int2dyn!(usize, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<i8>>() => int2dyn!(@opt i8, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<i16>>() => int2dyn!(@opt i16, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<i32>>() => int2dyn!(@opt i32, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<i64>>() => Ok(Box::new(Some(i))),
+            (Int(i), ty) if ty == TypeId::of::<Option<i128>>() => int2dyn!(@opt i128, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<isize>>() => int2dyn!(@opt isize, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<u8>>() => int2dyn!(@opt u8, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<u16>>() => int2dyn!(@opt u16, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<u32>>() => int2dyn!(@opt u32, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<u64>>() => int2dyn!(@opt u64, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<u128>>() => int2dyn!(@opt u128, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<usize>>() => int2dyn!(@opt usize, i),
             (Int(_), _) => Err(mismatch()),
-            (Float(f), ty) if id_eq!(ty, f32) => Ok(Box::new(f as f32)), // TODO: fishy!
-            (Float(f), ty) if id_eq!(ty, f64) => Ok(Box::new(f)),
-            (Float(f), ty) if id_eq!(ty, Option<f32>) => Ok(Box::new(Some(f as f32))), // TODO: fishy!
-            (Float(f), ty) if id_eq!(ty, Option<f64>) => Ok(Box::new(Some(f))),
+            (Float(f), ty) if ty == TypeId::of::<f32>() => Ok(Box::new(f as f32)),
+            (Float(f), ty) if ty == TypeId::of::<f64>() => Ok(Box::new(f)),
+            (Float(f), ty) if ty == TypeId::of::<Option<f32>>() => Ok(Box::new(Some(f as f32))),
+            (Float(f), ty) if ty == TypeId::of::<Option<f64>>() => Ok(Box::new(Some(f))),
             (Float(_), _) => Err(mismatch()),
-            (Bool(b), ty) if id_eq!(ty, bool) => Ok(Box::new(b)),
-            (Bool(b), ty) if id_eq!(ty, Option<bool>) => Ok(Box::new(Some(b))),
+            (Bool(b), ty) if ty == TypeId::of::<bool>() => Ok(Box::new(b)),
+            (Bool(b), ty) if ty == TypeId::of::<Option<bool>>() => Ok(Box::new(Some(b))),
             (Bool(_), _) => Err(mismatch()),
-            (Str(s), ty) if id_eq!(ty, String) => Ok(Box::new(s)),
-            (Str(s), ty) if id_eq!(ty, Option<String>) => Ok(Box::new(Some(s))),
+            (Str(s), ty) if ty == TypeId::of::<String>() => Ok(Box::new(s)),
+            (Str(s), ty) if ty == TypeId::of::<Option<String>>() => Ok(Box::new(Some(s))),
             (Str(_), _) => Err(mismatch()),
 
             (Null, _) => unsupported,
