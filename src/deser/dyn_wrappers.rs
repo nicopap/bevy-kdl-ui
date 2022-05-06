@@ -36,122 +36,15 @@
 //!
 //! We also take advantage of a clear API definition to provide meaningfull
 //! errors when accessing and adding fields to `Dynamic*` stuff.
-use std::fmt::{self, Display};
+use std::fmt;
 use std::marker::PhantomData;
 
+use super::access::{self, Position};
 use super::DynRefl;
 use bevy_reflect::{
     DynamicList, DynamicMap, DynamicStruct, DynamicTuple, DynamicTupleStruct, NamedField,
     TypeIdentity, UnnamedField,
 };
-use kdl::KdlIdentifier;
-use nonmax::NonMaxU8;
-use thiserror::Error;
-
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
-pub struct Position(NonMaxU8);
-impl Position {
-    pub(super) fn value(&self) -> usize {
-        self.0.get() as usize
-    }
-    pub(super) fn new(position: usize) -> Self {
-        // unwrap: Only panics if a struct has more than 256 fields
-        let u8: u8 = position.try_into().unwrap();
-        Self::new_u8(u8)
-    }
-    pub(super) fn new_u8(position: u8) -> Self {
-        // unwrap: Only panics if a struct has more than 255 fields
-        Self(position.try_into().unwrap())
-    }
-}
-impl Display for Position {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-#[derive(Debug, Clone)]
-pub enum FieldRef {
-    Implicit,
-    Positional(Position),
-    // TODO(PERF): this would save us SO MUCH allocation if this was &str.
-    // But the major issue I've never figured a clean way to deal properly
-    // with it in the `RwStruct` trait.
-    Named(String),
-}
-impl fmt::Display for FieldRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Implicit => write!(f, "unspecified field"),
-            Self::Positional(p) => write!(f, "field {p}"),
-            Self::Named(name) => write!(f, "field \"{name}\""),
-        }
-    }
-}
-impl FieldRef {
-    pub(super) fn from_ident(ident: &KdlIdentifier) -> Self {
-        let name = ident.value();
-        match name.strip_prefix('.').map(str::parse::<u8>) {
-            None => Self::Implicit,
-            Some(Ok(index)) => Self::Positional(Position::new_u8(index)),
-            Some(Err(_)) => Self::Named(name.split_at(1).1.to_string()),
-        }
-    }
-    pub(super) fn anon(self) -> Result<(), FieldError> {
-        match self {
-            Self::Implicit => Ok(()),
-            Self::Positional(_) | Self::Named(_) => {
-                Err(FieldError::WrongAccess { expected: AccessType::Anon, actual: self })
-            }
-        }
-    }
-    pub(super) fn pos(self) -> Result<Box<Position>, FieldError> {
-        match self {
-            Self::Implicit | Self::Named(_) => {
-                Err(FieldError::WrongAccess { expected: AccessType::Pos, actual: self })
-            }
-            Self::Positional(n) => Ok(Box::new(n)),
-        }
-    }
-    pub(super) fn name(self) -> Result<Box<str>, FieldError> {
-        match self {
-            Self::Implicit | Self::Positional(_) => {
-                Err(FieldError::WrongAccess { expected: AccessType::Named, actual: self })
-            }
-            Self::Named(n) => Ok(n.into_boxed_str()),
-        }
-    }
-}
-#[derive(Debug, Clone)]
-pub enum AccessType {
-    Anon,
-    Pos,
-    Named,
-}
-impl fmt::Display for AccessType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Anon => write!(f, "anonymous access"),
-            Self::Pos => write!(f, "explicity position access"),
-            Self::Named => write!(f, "by-name access"),
-        }
-    }
-}
-#[derive(Debug, Error)]
-pub enum FieldError {
-    #[error("Expected a {expected}, but accessed by {actual}")]
-    WrongAccess {
-        expected: AccessType,
-        actual: FieldRef,
-    },
-    #[error("Field `{0}` is declared multiple times.")]
-    AlreadyExists(String),
-    #[error("{0} doesn't exist in specified struct")]
-    OutOfBound(String),
-    #[error("The struct has {expected} fields, but only {actual} **valid** fields were declared")]
-    FieldCountMismatch { expected: usize, actual: usize },
-    #[error("Tried to add value of wrong type to an homogenous list")]
-    NonHomoType,
-}
 
 /// Wraps a Dynamic* to set the fields in arbitrary order while
 /// preserving the final order.
@@ -179,21 +72,21 @@ where
 {
     type Out = T;
     type Field = Box<F>;
-    fn add_field<T2R>(&mut self, field: Box<F>, make_value: T2R) -> Result<(), FieldError>
+    fn add_field<T2R>(&mut self, field: Box<F>, make_value: T2R) -> Result<(), access::Error>
     where
         T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>,
     {
-        let oob = || FieldError::OutOfBound(format!("{field:?}"));
+        let oob = || access::Error::OutOfBound(format!("{field:?}"));
         let (pos, ty_id) = T::map(self.map, &field).ok_or_else(oob)?;
         if self.buffer.iter().any(|(p, _, _)| p == &pos) {
-            return Err(FieldError::AlreadyExists(pos.to_string()));
+            return Err(access::Error::AlreadyExists(pos.to_string()));
         }
         if let Some(value) = make_value(ty_id) {
             self.buffer.push((pos, field, value));
         }
         Ok(())
     }
-    fn complete(self) -> Result<T, FieldError> {
+    fn complete(self) -> Result<T, access::Error> {
         if self.buffer.len() == self.map.len() {
             let Self { name, mut buffer, .. } = self;
             let mut ret = T::default();
@@ -204,7 +97,7 @@ where
             }
             Ok(ret)
         } else {
-            Err(FieldError::FieldCountMismatch {
+            Err(access::Error::FieldCountMismatch {
                 expected: self.map.len(),
                 actual: self.buffer.len(),
             })
@@ -244,12 +137,12 @@ where
     ///
     /// It is the responsibility of the user that if `make_value` returns a None, a
     /// corresponding error is registered in the calling code.
-    fn add_field<T2R>(&mut self, (): Self::Field, make_value: T2R) -> Result<(), FieldError>
+    fn add_field<T2R>(&mut self, (): Self::Field, make_value: T2R) -> Result<(), access::Error>
     where
         T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>,
     {
         let idx = Position::new_u8(self.current);
-        let oob = || FieldError::OutOfBound(format!("field .{idx}"));
+        let oob = || access::Error::OutOfBound(format!("field .{idx}"));
         let (field, ty_id) = T::unmap(self.map, idx).ok_or_else(oob)?;
         self.current += 1;
         if let Some(value) = make_value(ty_id) {
@@ -257,11 +150,11 @@ where
         };
         Ok(())
     }
-    fn complete(self) -> Result<Self::Out, FieldError> {
+    fn complete(self) -> Result<Self::Out, access::Error> {
         if self.current as usize == self.map.len() {
             Ok(self.inner)
         } else {
-            Err(FieldError::FieldCountMismatch {
+            Err(access::Error::FieldCountMismatch {
                 expected: self.map.len(),
                 actual: self.current as usize,
             })
@@ -275,10 +168,10 @@ type Tid = TypeIdentity;
 pub(super) trait RwStruct {
     type Field;
     type Out;
-    fn add_field<T2R>(&mut self, field: Self::Field, make_value: T2R) -> Result<(), FieldError>
+    fn add_field<T2R>(&mut self, field: Self::Field, make_value: T2R) -> Result<(), access::Error>
     where
         T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>;
-    fn complete(self) -> Result<Self::Out, FieldError>;
+    fn complete(self) -> Result<Self::Out, access::Error>;
 }
 /// A DynamicList with guarenteed type (mostly to be able to impl RwStruct on it).
 ///
@@ -299,7 +192,7 @@ impl HomoList {
 impl RwStruct for HomoList {
     type Field = ();
     type Out = DynamicList;
-    fn add_field<T2R>(&mut self, _field: Self::Field, make_value: T2R) -> Result<(), FieldError>
+    fn add_field<T2R>(&mut self, _field: Self::Field, make_value: T2R) -> Result<(), access::Error>
     where
         T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>,
     {
@@ -307,10 +200,10 @@ impl RwStruct for HomoList {
             self.list.push_box(value);
             Ok(())
         } else {
-            Err(FieldError::NonHomoType)
+            Err(access::Error::NonHomoType)
         }
     }
-    fn complete(self) -> Result<Self::Out, FieldError> {
+    fn complete(self) -> Result<Self::Out, access::Error> {
         Ok(self.list)
     }
 }
@@ -336,7 +229,7 @@ impl HomoMap {
 impl RwStruct for HomoMap {
     type Field = Box<str>;
     type Out = DynamicMap;
-    fn add_field<T2R>(&mut self, field: Self::Field, make_value: T2R) -> Result<(), FieldError>
+    fn add_field<T2R>(&mut self, field: Self::Field, make_value: T2R) -> Result<(), access::Error>
     where
         T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>,
     {
@@ -345,10 +238,10 @@ impl RwStruct for HomoMap {
             self.map.insert_boxed(Box::new(string_field), value);
             Ok(())
         } else {
-            Err(FieldError::NonHomoType)
+            Err(access::Error::NonHomoType)
         }
     }
-    fn complete(self) -> Result<Self::Out, FieldError> {
+    fn complete(self) -> Result<Self::Out, access::Error> {
         Ok(self.map)
     }
 }

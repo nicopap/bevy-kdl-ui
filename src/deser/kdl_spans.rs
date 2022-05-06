@@ -28,12 +28,6 @@ pub(super) struct DocumentSizes {
     pub(super) nodes: u32,
     pub(super) trailing: u32,
 }
-impl DocumentSizes {
-    pub(super) fn total(&self) -> u32 {
-        let DocumentSizes { leading, nodes, trailing } = self;
-        leading + nodes + trailing
-    }
-}
 #[derive(Clone, Copy, Debug)]
 pub(super) struct EntrySizes {
     pub(super) leading: u32,
@@ -74,17 +68,17 @@ impl AdhocLen for KdlIdentifier {
 }
 impl AdhocLen for KdlEntry {
     fn size(&self) -> u32 {
-        self.sizes().total()
+        self.len() as u32
     }
 }
 impl AdhocLen for KdlDocument {
     fn size(&self) -> u32 {
-        self.sizes().total()
+        self.len() as u32
     }
 }
 impl AdhocLen for KdlNode {
     fn size(&self) -> u32 {
-        self.sizes().total()
+        self.len() as u32
     }
 }
 

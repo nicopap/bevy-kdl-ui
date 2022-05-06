@@ -1,9 +1,18 @@
+//! Deserialize a single rust data structure from a single KDL node.
+//!
+//! This includes proper error reporting and resilient traversal so
+//! that it's possible to report more than a single error to the user.
 use bevy_reflect::Reflect;
 
+pub mod access;
 mod dyn_wrappers;
+mod err;
 mod kdl_spans;
 mod span;
-pub mod visit;
+mod visit;
+
+pub use err::{ConvertError, ConvertErrors, ConvertResult};
+pub use visit::convert_node;
 
 pub(super) type DynRefl = Box<dyn Reflect>;
 
@@ -14,6 +23,19 @@ mod test {
     use bevy_reflect::{FromReflect, Reflect, TypeRegistration, TypeRegistry};
     use bevy_utils::HashMap;
     use kdl::KdlDocument;
+
+    macro_rules! map {
+        ($($key:expr => $value:expr),*$(,)?) => ({
+            let mut ret = HashMap::default();
+            $(ret.insert($key.to_owned(), $value);)*
+            ret
+        })
+    }
+    macro_rules! string_vec {
+        ($($value:expr),*$(,)?) => (
+            vec![$($value.to_owned(),)*]
+        )
+    }
 
     #[derive(Reflect, Debug, PartialEq, Default, FromReflect)]
     struct A {
@@ -69,7 +91,7 @@ mod test {
     #[derive(Clone, PartialEq, Reflect, Default, Debug, FromReflect)]
     #[reflect(PartialEq)]
     struct Bar(f64);
-    fn parse_kdl<T: FromReflect>(text: &str) -> T {
+    fn parse_kdl<T: FromReflect>(text: &str) -> ConvertResult<T> {
         let mut registry = TypeRegistry::default();
         macro_rules! register_all {
             ($($ty_name:ty ),* $(,)? ) => ({$(
@@ -88,62 +110,57 @@ mod test {
         register_more!((i128, f32, String, f32, u32), Option<u8>, Vec<String>, HashMap<String, f32>);
         let mut document: KdlDocument = text.parse().unwrap();
         let mut node = document.nodes_mut().pop().unwrap();
-        match visit::parse_node(&mut node, &registry) {
-            Ok(val) => T::from_reflect(val.as_ref()).unwrap(),
-            Err(err) => {
-                panic!("{}", err.show_for(text))
-            }
-        }
+        convert_node(&mut node, &registry).map(|val| T::from_reflect(val.as_ref()).unwrap())
     }
     #[test]
     fn test_component() {
         // for struct-type components
         let kdl_foo = r#"Foo .bar=1034 .baz="hello" .xo="B";"#;
         let expected_foo = Foo { bar: 1034, baz: "hello".to_owned(), xo: B };
-        assert_eq!(parse_kdl::<Foo>(kdl_foo), expected_foo);
+        assert_eq!(parse_kdl::<Foo>(kdl_foo), Ok(expected_foo.clone()));
 
         // Anonymous access (with marker components)
         let kdl_foo = r#"Foo "B" 1034 "hello";"#;
-        assert_eq!(parse_kdl::<Foo>(kdl_foo), expected_foo);
+        assert_eq!(parse_kdl::<Foo>(kdl_foo), Ok(expected_foo));
 
         // For tuple-type components
         let kdl_bar = r#"Bar 3.0;"#;
         let expected_bar = Bar(3.0);
-        assert_eq!(parse_kdl::<Bar>(kdl_bar), expected_bar);
+        assert_eq!(parse_kdl::<Bar>(kdl_bar), Ok(expected_bar));
     }
     #[rustfmt::skip]
     #[test]
     fn more_test() {
         // TODO: Enum variants n' stuff
-        // assert_eq!(parse_kdl::<E>("E \"Y\""), E::Y);
+        // assert_eq!(parse_kdl::<E>("E \"Y\""), Ok(E::Y));
 
-        assert_eq!(parse_kdl::<D>("D .x=10;"), D { x: 10 });
-        assert_eq!(parse_kdl::<D>("D 10;"), D { x: 10 });
+        assert_eq!(parse_kdl::<D>("D .x=10;"), Ok(D { x: 10 }));
+        assert_eq!(parse_kdl::<D>("D 10;"), Ok(D { x: 10 }));
 
-        assert_eq!(parse_kdl::<C>("C 22.0;"), C(22.0));
-        assert_eq!(parse_kdl::<C>("C .0=22.0;"), C(22.0));
+        assert_eq!(parse_kdl::<C>("C 22.0;"), Ok(C(22.0)));
+        assert_eq!(parse_kdl::<C>("C .0=22.0;"), Ok(C(22.0)));
 
-        assert_eq!(parse_kdl::<B>("B"), B);
+        assert_eq!(parse_kdl::<B>("B"), Ok(B));
 
         assert_eq!(
             // explicit declaration
             parse_kdl::<A>("A .x=3030 { .d .x=140; .c 444.0;}"),
-            A { x: 3030, d: D { x: 140 }, c: C(444.0) }
+            Ok(A { x: 3030, d: D { x: 140 }, c: C(444.0) })
         );
         assert_eq!(
             // Anonymous declaration
             parse_kdl::<A>("A 4144 { D .x=441; C 414.0;}"),
-            A { x: 4144, d: D { x: 441 }, c: C(414.0) }
+            Ok(A { x: 4144, d: D { x: 441 }, c: C(414.0) })
         );
         assert_eq!(
             // Arbitrary order
             parse_kdl::<A>("A .x=5151 { .c 515.0; .d 155; }"),
-            A { x: 5151, d: D { x: 155 }, c: C(515.0) }
+            Ok(A { x: 5151, d: D { x: 155 }, c: C(515.0) })
         );
         assert_eq!(
             // value type casting
             parse_kdl::<A>("A .x=6161 .c=616.0 .d=16;"),
-            A { x: 6161, d: D { x: 16 }, c: C(616.0) }
+            Ok(A { x: 6161, d: D { x: 16 }, c: C(616.0) })
         );
         let f = r#"
         F {
@@ -154,14 +171,7 @@ mod test {
             d: (-34234552, 3943.13456, "I am a foo".to_owned(), 65431.25543243, 0b101010101010101010101010),
             b: Some(255),
         };
-        assert_eq!(parse_kdl::<F>(f), f_v);
-        macro_rules! map {
-            ($($key:expr => $value:expr),*$(,)?) => ({
-                let mut ret = HashMap::default();
-                $(ret.insert($key.to_owned(), $value);)*
-                ret
-            })
-        }       
+        assert_eq!(parse_kdl::<F>(f), Ok(f_v));
         let g = r#"
         G {
             .y "hello" "this" "is" "a" "series" "of" "worlds";
@@ -169,14 +179,50 @@ mod test {
         } 
         "#;
         let g_v = G {
-            y: vec!["hello".to_owned(), "this".to_owned(), "is".to_owned(), "a".to_owned(), "series".to_owned(), "of".to_owned(), "worlds".to_owned()],
+            y: string_vec!["hello", "this", "is", "a", "series", "of", "worlds"],
             z: map!{"pi" => 3.14, "e" => 2.7182818, "tau" => 6.28, "ln2" => 0.69314},
         };
-        assert_eq!(parse_kdl::<G>(g), g_v);
+        assert_eq!(parse_kdl::<G>(g), Ok(g_v));
     }
-    // TODO: test the unhappy path
-    // assert_eq!( // Bad anonymous declaration
-    //     parse_kdl::<A>("A 5151 { C 515.0; D 155; }"),
-    //     A { x: 5151, d: D { x: 155 }, c: C(515.0) }
-    // );
+    #[test]
+    fn parse_errors() {
+        use access::Error::NonHomoType;
+        use access::Mode::{Anon, Named, Pos};
+        let field =
+            |expected, actual| ConvertError::Access(access::Error::WrongMode { expected, actual });
+        let ty_err = |exp: &str, act: &str| ConvertError::TypeMismatch {
+            expected: exp.to_string(),
+            actual: act.to_string(),
+        };
+        // Swap two anonymous declarations
+        let doc = "A 1111 {  C 111.0; D 11;}";
+        let err = parse_kdl::<A>(doc).unwrap_err();
+        let mut err: Vec<_> = err.errors().map(|(s, e)| (&doc[s.range()], e)).collect();
+        err.sort_by_key(|t| t.0);
+        assert_eq!(err[0], ("C", &ty_err("D", "C")));
+        assert_eq!(err[1], ("D", &ty_err("C", "D")));
+        assert_eq!(err.len(), 2);
+
+        // Wrong type on newtype with field access
+        let doc = "A .x=2121 .d=220.0 .c=22;";
+        let err = parse_kdl::<A>(doc).unwrap_err();
+        let mut err: Vec<_> = err.errors().map(|(s, e)| (&doc[s.range()], e)).collect();
+        err.sort_by_key(|t| t.0);
+        assert!(matches!(err[0], ("22", &ConvertError::TypeMismatch { .. })));
+
+        // wrong type in homogenous list and maps
+        let doc = r#"
+        G { .y "hello" "this" 12 "a" "series" "of" "worlds";
+            .z .pi=3.14 .e=2.7182818 .large=999999 .tau=6.28 ln2=0.69314;  }"#;
+        let err = parse_kdl::<G>(doc).unwrap_err();
+        let mut err: Vec<_> = err.errors().collect();
+        err.sort_by_key(|t| t.0);
+        let err: Vec<_> = err.into_iter().map(|(s, e)| (&doc[s.range()], e)).collect();
+        assert_eq!(err[0], ("12", &ty_err("alloc::string::String", "int(12)")));
+        assert_eq!(err[1], ("12", &ConvertError::Access(NonHomoType)));
+        assert_eq!(err[2], ("999999", &ty_err("f32", "int(999999)")));
+        assert_eq!(err[3], ("999999", &ConvertError::Access(NonHomoType)));
+        assert_eq!(err[4], ("ln2=", &field(Named, access::Field::Implicit)));
+        assert_eq!(err.len(), 5);
+    }
 }

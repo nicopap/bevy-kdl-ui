@@ -1,46 +1,22 @@
 use std::any::{self, TypeId};
-use std::fmt::{self, Write};
+use std::fmt;
 
 use bevy_reflect::{
     DynamicStruct, DynamicTuple, DynamicTupleStruct, Reflect, TypeIdentity, TypeInfo,
     TypeRegistration, TypeRegistry,
 };
 use kdl::{KdlNode, KdlValue};
-use thiserror::Error;
 
-use super::dyn_wrappers::{Anon, FieldError, FieldRef, HomoList, HomoMap, Rw, RwStruct};
+use super::access::{self, Field};
+use super::dyn_wrappers::{Anon, HomoList, HomoMap, Rw, RwStruct};
 use super::kdl_spans::{SpannedEntry, SpannedNode};
 use super::span::Span;
 use super::DynRefl;
+use super::{ConvertError, ConvertResult};
 
-/// Ways expectation algorithm can screw up.
-#[derive(Debug, Error)]
-pub enum ExpError {
-    #[error("This operation is unsupported: {0}")]
-    GenericUnsupported(&'static str),
-    #[error("Kdl declaration has type `{actual}` but rust type `{expected}` was expected")]
-    TypeMismatch { expected: String, actual: String },
-    #[error("Invalid integer, value {0} out of bound for rust type: {1}")]
-    IntError(i64, &'static str),
-    #[error("Field access error: {0}")]
-    FieldError(#[from] FieldError),
-    #[error("There is no such registered type: {0}")]
-    NoSuchType(String),
-    // TODO: try remove this, seee what it does
-    #[error("The type name was malformed: {0}")]
-    MalformedType(String),
-    #[error("Expected a value in first entry field for type: {0}, got nothing")]
-    NoValuesInNode(&'static str),
-    #[error("List cannot be declared using explicit positioning.")]
-    NamedListDeclaration,
-    #[error("Map items must be declared in the form `.field=value`.")]
-    UnnamedMapDeclaration,
-    #[error("Component names should never start with a dot.")]
-    BadComponentTypeName,
-}
-type ExpResult<T> = Result<T, ExpError>;
+type ConvResult<T> = Result<T, ConvertError>;
 
-pub fn parse_node(node: &KdlNode, reg: &TypeRegistry) -> ParseResult<DynRefl> {
+pub fn convert_node(node: &KdlNode, reg: &TypeRegistry) -> ConvertResult<DynRefl> {
     let spanned = SpannedNode::new(node, 0);
     Context::parse_component(spanned, reg)
 }
@@ -85,7 +61,7 @@ impl KdlConcrete {
     /// `handle` proves to be such a thing.
     ///
     /// This is useful to inline in entry position newtype struct.
-    fn dyn_value(self, handle: &TypeIdentity, reg: &TypeRegistry) -> ExpResult<DynRefl> {
+    fn dyn_value(self, handle: &TypeIdentity, reg: &TypeRegistry) -> ConvResult<DynRefl> {
         self.dyn_value_newtypes(handle, reg, Vec::new())
     }
     /// Recursively resolves newtype structs attempting to summarize them into a primitive
@@ -95,11 +71,11 @@ impl KdlConcrete {
         handle: &TypeIdentity,
         reg: &TypeRegistry,
         mut wrappers: Vec<&'static str>,
-    ) -> ExpResult<DynRefl> {
+    ) -> ConvResult<DynRefl> {
         use TypeInfo::{Struct, Tuple, TupleStruct, Value};
         wrappers.push(handle.type_name());
         let mismatch = |actual| {
-            || ExpError::TypeMismatch {
+            || ConvertError::TypeMismatch {
                 expected: if wrappers.len() == 1 {
                     wrappers[0].to_string()
                 } else {
@@ -124,7 +100,7 @@ impl KdlConcrete {
             }}
         }
         match reg.get_type_info(handle.type_id()) {
-            None => Err(ExpError::NoSuchType(handle.type_name().to_string())),
+            None => Err(ConvertError::NoSuchType(handle.type_name().to_string())),
             Some(Struct(info)) if info.field_len() == 0 => {
                 match (self, reg.get(handle.type_id())) {
                     (Self::Str(s), Some(reg)) if reg.short_name() == s || reg.name() == s => {
@@ -132,7 +108,7 @@ impl KdlConcrete {
                         ret.set_name(handle.type_name().to_string());
                         Ok(Box::new(ret))
                     }
-                    (_, None) => Err(ExpError::NoSuchType(handle.type_name().to_string())),
+                    (_, None) => Err(ConvertError::NoSuchType(handle.type_name().to_string())),
                     (s, Some(_)) => Err(mismatch(s.to_string())()),
                 }
             }
@@ -151,8 +127,8 @@ impl KdlConcrete {
     fn dyn_primitive_value(
         self,
         handle: &TypeIdentity,
-        mismatch: impl FnOnce() -> ExpError,
-    ) -> ExpResult<DynRefl> {
+        mismatch: impl FnOnce() -> ConvertError,
+    ) -> ConvResult<DynRefl> {
         use KdlConcrete::*;
         macro_rules! int2dyn {
             (@opt $int_type:ty, $int_value:expr) => {{
@@ -160,12 +136,12 @@ impl KdlConcrete {
             }};
             ($int_type:ty, $int_value:expr) => {
                 <$int_type>::try_from($int_value)
-                    .map_err(|_| ExpError::IntError($int_value, any::type_name::<$int_type>()))
+                    .map_err(|_| ConvertError::IntDomain($int_value, any::type_name::<$int_type>()))
                     .map::<DynRefl, _>(|i| Box::new(i))
             };
         }
         let msg = "null values currently cannot be converted into rust types";
-        let unsupported = Err(ExpError::GenericUnsupported(msg));
+        let unsupported = || Err(ConvertError::GenericUnsupported(msg.to_string()));
         match (self, handle.type_id()) {
             (Int(i), ty) if ty == TypeId::of::<i8>() => int2dyn!(i8, i),
             (Int(i), ty) if ty == TypeId::of::<i16>() => int2dyn!(i16, i),
@@ -204,7 +180,7 @@ impl KdlConcrete {
             (Str(s), ty) if ty == TypeId::of::<Option<String>>() => Ok(Box::new(Some(s))),
             (Str(_), _) => Err(mismatch()),
 
-            (Null, _) => unsupported,
+            (Null, _) => unsupported(),
         }
     }
 }
@@ -218,66 +194,33 @@ enum DeclarMode {
     ByField,
 }
 
-type FieldF<F> = fn(FieldRef) -> Result<F, FieldError>;
+type FieldF<F> = fn(Field) -> Result<F, access::Error>;
 
-#[derive(Debug)]
-pub struct ParseErrors {
-    errors: Vec<(Span, ExpError)>,
-}
-impl From<Vec<(Span, ExpError)>> for ParseErrors {
-    fn from(errors: Vec<(Span, ExpError)>) -> Self {
-        Self { errors }
-    }
-}
-impl ParseErrors {
-    pub fn show_for(&self, file: &str) -> String {
-        let mut ret = String::with_capacity(self.errors.len() * 160);
-        for (offset, error) in &self.errors {
-            ret.push('\n');
-            ret.push_str(&file);
-            writeln!(
-                &mut ret,
-                "\n{x: >off$}{x:->siz$}",
-                off = offset.offset as usize,
-                siz = offset.size as usize,
-                x = ""
-            )
-            .unwrap();
-            writeln!(&mut ret, "\nat {}: {error}", offset.offset).unwrap();
-        }
-        ret
-    }
-    pub fn show_no_context(&self) -> String {
-        let mut ret = String::with_capacity(self.errors.len() * 80);
-        for (offset, error) in &self.errors {
-            writeln!(&mut ret, "{offset}: {error}").unwrap();
-        }
-        ret
-    }
-}
-fn get_named<'r>(name: &str, reg: &'r TypeRegistry) -> ExpResult<Option<&'r TypeRegistration>> {
+/// Get type registration from `reg` with provided `name`, also tries `short_name`.
+///
+/// Returns `Err(NoSuchType)` if no type with provided `name` was registered.
+fn get_named<'r>(name: &str, reg: &'r TypeRegistry) -> ConvResult<Option<&'r TypeRegistration>> {
     if name.starts_with('.') {
         Ok(None)
     } else {
         reg.get_with_name(name)
             .or_else(|| reg.get_with_short_name(name))
             .map(Some)
-            .ok_or(ExpError::NoSuchType(name.to_owned()))
+            .ok_or(ConvertError::NoSuchType(name.to_owned()))
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Offset(usize);
 struct Context<'r> {
     span: Span,
-    errors: Vec<(Span, ExpError)>,
+    errors: Vec<(Span, ConvertError)>,
     registry: &'r TypeRegistry,
 }
-pub type ParseResult<T> = Result<T, ParseErrors>;
 impl<'r> Context<'r> {
-    fn parse_component(node: SpannedNode, registry: &'r TypeRegistry) -> ParseResult<DynRefl> {
+    fn parse_component(node: SpannedNode, registry: &'r TypeRegistry) -> ConvertResult<DynRefl> {
         let (span, name) = node.name();
         let mut ctx = Self { span, errors: Vec::new(), registry };
-        let err = || vec![(span, ExpError::BadComponentTypeName)];
+        let err = || vec![(span, ConvertError::BadComponentTypeName)];
         let registration = get_named(name.value(), registry)
             .map_err(|e| vec![(span, e)])?
             .ok_or_else(err)?;
@@ -309,40 +252,45 @@ impl<'r> Context<'r> {
     fn error_resilient<O, E, F>(&mut self, wrapped: F) -> Option<O>
     where
         F: FnOnce(&mut Self) -> Result<O, E>,
-        E: Into<ExpError>,
+        E: Into<ConvertError>,
     {
         match wrapped(self) {
             Ok(v) => Some(v),
             Err(err) => self.add_error(err.into()),
         }
     }
-    fn add_error<T>(&mut self, error: ExpError) -> Option<T> {
+    fn add_error<T>(&mut self, error: ConvertError) -> Option<T> {
         self.errors.push((self.span, error));
         None
     }
 
-    fn entry2dyn<F, T>(&mut self, entry: SpannedEntry, acc: &mut T, get: FieldF<F>) -> ExpResult<()>
+    fn entry2dyn<F, T>(
+        &mut self,
+        entry: SpannedEntry,
+        acc: &mut T,
+        get: FieldF<F>,
+    ) -> ConvResult<()>
     where
         T: RwStruct<Field = F>,
     {
-        use FieldRef::Implicit;
+        use Field::Implicit;
         let field = self
             .read_span_opt(entry.name())
-            .map_or(Implicit, FieldRef::from_ident);
+            .map_or(Implicit, Field::from_ident);
         let make_value = move |ty_id: &TypeIdentity| self.dyn_value(ty_id, entry);
         acc.add_field(get(field)?, make_value)?;
         Ok(())
     }
-    fn node2dyn<F, T>(&mut self, node: SpannedNode, acc: &mut T, get: FieldF<F>) -> ExpResult<()>
+    fn node2dyn<F, T>(&mut self, node: SpannedNode, acc: &mut T, get: FieldF<F>) -> ConvResult<()>
     where
         T: RwStruct<Field = F>,
     {
         let name = self.read_span(node.name());
-        let field = FieldRef::from_ident(name);
+        let field = Field::from_ident(name);
         let actual = get_named(name.value(), self.registry);
         let make_value = move |expected_id: &TypeIdentity| {
             let expected = self.registry.get(expected_id.type_id());
-            let no_such_expected = || ExpError::NoSuchType(expected_id.type_name().to_owned());
+            let no_such_expected = || ConvertError::NoSuchType(expected_id.type_name().to_owned());
             let field_expected_ty = match (actual, expected) {
                 (Err(err), Some(expected)) => {
                     self.add_error::<()>(err);
@@ -352,7 +300,7 @@ impl<'r> Context<'r> {
                 (Ok(None), Some(expected)) => expected,
                 (Ok(Some(actu)), Some(expect)) if actu.type_id() == expect.type_id() => expect,
                 (Ok(Some(bad_actual)), Some(expected)) => {
-                    self.add_error::<()>(ExpError::TypeMismatch {
+                    self.add_error::<()>(ConvertError::TypeMismatch {
                         expected: expected.short_name().to_string(),
                         actual: bad_actual.short_name().to_string(),
                     });
@@ -408,7 +356,7 @@ impl<'r> Context<'r> {
         match kdl_type {
             Err(err) => self.add_error(err),
             Ok(Some(kdl_type)) if kdl_type.type_id() != rust_type.type_id() => {
-                self.add_error(ExpError::TypeMismatch {
+                self.add_error(ConvertError::TypeMismatch {
                     expected: rust_type.type_name().to_string(),
                     actual: kdl_type.name().to_string(),
                 })
@@ -430,23 +378,25 @@ impl<'r> Context<'r> {
         }
         match (self.declar_of_node(node), ty_info) {
             (ModAnon, Tuple(i)) => make_dyn!(Anon::<DynamicTuple>, i, |_| Ok(())),
-            (ByField, Tuple(i)) => make_dyn!(Rw::<DynamicTuple>, i, FieldRef::pos),
+            (ByField, Tuple(i)) => make_dyn!(Rw::<DynamicTuple>, i, Field::pos),
             (ModAnon, Struct(i)) => make_dyn!(Anon::<DynamicStruct>, i, |_| Ok(())),
-            (ByField, Struct(i)) => make_dyn!(Rw::<DynamicStruct>, i, FieldRef::name),
+            (ByField, Struct(i)) => make_dyn!(Rw::<DynamicStruct>, i, Field::name),
             (ModAnon, TupleStruct(i)) => make_dyn!(Anon::<DynamicTupleStruct>, i, |_| Ok(())),
-            (ByField, TupleStruct(i)) => make_dyn!(Rw::<DynamicTupleStruct>, i, FieldRef::pos),
+            (ByField, TupleStruct(i)) => make_dyn!(Rw::<DynamicTupleStruct>, i, Field::pos),
             (ModAnon, List(i)) => make_dyn!(@homogenous HomoList::new(i.item()), |_|Ok(())),
-            (ByField, List(_)) => self.add_error(ExpError::NamedListDeclaration),
-            (ModAnon, Map(_)) => self.add_error(ExpError::UnnamedMapDeclaration),
-            (ByField, Map(i)) => make_dyn!(@homogenous HomoMap::new(i.value()), FieldRef::name),
+            (ByField, List(_)) => self.add_error(ConvertError::NamedListDeclaration),
+            (ModAnon, Map(_)) => self.add_error(ConvertError::UnnamedMapDeclaration),
+            (ByField, Map(i)) => make_dyn!(@homogenous HomoMap::new(i.value()), Field::name),
             (_, Value(i)) => self
-                .error_resilient::<_, ExpError, _>(|s| {
-                    let err = ExpError::NoValuesInNode(i.id().type_name());
+                .error_resilient::<_, ConvertError, _>(|s| {
+                    let err = ConvertError::NoValuesInNode(i.id().type_name());
                     let entries = s.read_span(node.entries()).next().ok_or(err)?;
                     Ok(s.dyn_value(ty_info.id(), entries))
                 })
                 .flatten(),
-            unsupported => todo!("implement parsing for: {unsupported:?}"),
+            any_else => self.add_error(ConvertError::GenericUnsupported(format!(
+                "kdl node and rust type pair: {any_else:?}"
+            ))),
         }
     }
     /// The style of declaration used in specified node.
@@ -457,7 +407,7 @@ impl<'r> Context<'r> {
     fn declar_of_node(&mut self, node: SpannedNode) -> DeclarMode {
         use DeclarMode::{Anon, ByField};
         let ident_mode = |ident| {
-            let is_anon = FieldRef::from_ident(ident).anon().is_ok();
+            let is_anon = Field::from_ident(ident).anon().is_ok();
             (if is_anon { Anon } else { ByField })
         };
         let entry = self.read_span(node.entries()).next();
