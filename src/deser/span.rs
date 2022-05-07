@@ -20,4 +20,7 @@ impl Span {
     pub fn range(&self) -> Range<usize> {
         (*self).into()
     }
+    pub fn pair(&self) -> (usize, usize) {
+        (self.offset as usize, self.size as usize)
+    }
 }

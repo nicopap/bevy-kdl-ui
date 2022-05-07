@@ -3,6 +3,8 @@
 //! God I hate this, it's going to be very inneficient most likely,
 //! if every time I query for size, I have to walk through the entire
 //! document and check each value sizes and add up everything :/
+use std::fmt;
+
 use super::span::Span;
 use kdl::{KdlDocument, KdlEntry, KdlIdentifier, KdlNode, KdlValue};
 
@@ -216,5 +218,10 @@ impl<'a> SpannedNode<'a> {
             .children()
             .map(|n| SpannedDocument::new(n, offset));
         children.map(|c| (children_span, c))
+    }
+}
+impl<'a> fmt::Display for SpannedNode<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.node)
     }
 }

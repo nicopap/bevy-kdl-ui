@@ -94,14 +94,28 @@ impl fmt::Display for Mode {
 
 #[derive(Debug, Error, PartialEq)]
 pub enum Error {
-    #[error("Expected a {expected}, but accessed by {actual}")]
+    #[error("Expected a {expected}, but accessed by {actual}.")]
     WrongMode { expected: Mode, actual: Field },
     #[error("Field `{0}` is declared multiple times.")]
     AlreadyExists(String),
-    #[error("{0} doesn't exist in specified struct")]
+    #[error("{0} doesn't exist in specified struct.")]
     OutOfBound(String),
-    #[error("The struct has {expected} fields, but only {actual} **valid** fields were declared")]
+    #[error("The struct has {expected} fields, but only {actual} **valid** fields were declared.")]
     FieldCountMismatch { expected: usize, actual: usize },
-    #[error("Tried to add value of wrong type to an homogenous list or map")]
+    #[error("The elements of rust Lists and Maps must all be of the same type, yet more than one type found.")]
     NonHomoType,
+}
+impl Error {
+    // TODO: add a TypeInfo argument to precise which fields are possible, etc.
+    pub fn help(&self) -> Option<String> {
+        use Error::*;
+        use Mode::*;
+        match self {
+            WrongMode { expected: Anon, .. } => Some("Make all the field declarations in this struct explicit or remove the `.field` from this field".to_owned()),
+            WrongMode { expected: Pos, .. } => Some("Use a named position field `.0=\"like so\"`".to_owned()),
+            WrongMode { expected: Named, .. } => Some("Use a named field `.like=\"so\"`".to_owned()),
+            AlreadyExists(_)|OutOfBound(_) | FieldCountMismatch {..} => None,
+            NonHomoType => Some("Make sure you are not mixing multiple types in a list".to_owned()),
+        }
+    }
 }

@@ -1,5 +1,6 @@
 use std::any::{self, TypeId};
 use std::fmt;
+use std::string::ToString;
 
 use bevy_reflect::{
     DynamicStruct, DynamicTuple, DynamicTupleStruct, Reflect, TypeIdentity, TypeInfo,
@@ -9,10 +10,10 @@ use kdl::{KdlNode, KdlValue};
 
 use super::access::{self, Field};
 use super::dyn_wrappers::{Anon, HomoList, HomoMap, Rw, RwStruct};
+use super::err::SpannedError;
 use super::kdl_spans::{SpannedEntry, SpannedNode};
 use super::span::Span;
-use super::DynRefl;
-use super::{ConvertError, ConvertResult};
+use super::{ConvertError, ConvertErrors, ConvertResult, DynRefl};
 
 type ConvResult<T> = Result<T, ConvertError>;
 
@@ -213,24 +214,26 @@ fn get_named<'r>(name: &str, reg: &'r TypeRegistry) -> ConvResult<Option<&'r Typ
 pub struct Offset(usize);
 struct Context<'r> {
     span: Span,
-    errors: Vec<(Span, ConvertError)>,
+    errors: Vec<SpannedError>,
     registry: &'r TypeRegistry,
 }
 impl<'r> Context<'r> {
     fn parse_component(node: SpannedNode, registry: &'r TypeRegistry) -> ConvertResult<DynRefl> {
+        use ConvertError::BadComponentTypeName as BadType;
         let (span, name) = node.name();
         let mut ctx = Self { span, errors: Vec::new(), registry };
-        let err = || vec![(span, ConvertError::BadComponentTypeName)];
+        let err = || (node.to_string(), SpannedError::new(span, BadType));
         let registration = get_named(name.value(), registry)
-            .map_err(|e| vec![(span, e)])?
+            .map_err(|e| (node.to_string(), SpannedError::new(span, e)))?
             .ok_or_else(err)?;
 
         let ty_info = registration.type_info();
         let result = ctx.dyn_compound(ty_info, node);
-        (ctx.errors.is_empty())
-            .then(|| result)
-            .flatten()
-            .ok_or_else(|| ctx.errors.into())
+        if let Some(Some(result)) = ctx.errors.is_empty().then(|| result) {
+            Ok(result)
+        } else {
+            Err(ConvertErrors::new(node.to_string(), ctx.errors))
+        }
     }
     fn read_span<T>(&mut self, (span, t): (Span, T)) -> T {
         self.span = span;
@@ -260,7 +263,7 @@ impl<'r> Context<'r> {
         }
     }
     fn add_error<T>(&mut self, error: ConvertError) -> Option<T> {
-        self.errors.push((self.span, error));
+        self.errors.push(SpannedError::new(self.span, error));
         None
     }
 

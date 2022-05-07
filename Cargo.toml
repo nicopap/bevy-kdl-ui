@@ -10,6 +10,10 @@ repository = "https://github.com/nicopap/bevy-kdl-scene"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+fancy-errors = ["miette/fancy"]
+default = ["fancy-errors"]
+
 [dependencies]
 thiserror = "1.0"
 serde = "1.0"
@@ -17,10 +21,13 @@ anyhow = "1.0"
 bevy_reflect = "0.8.0-dev"
 kdl = "4.1"
 nonmax = "0.5"
+miette = "4.6"
 
 [dev-dependencies]
 # For testing the hashmap reflection
+bevy_reflect = "0.8.0-dev"
 bevy_utils = "0.8.0-dev"
+miette = {version ="4.6", features=["fancy"]}
 
 [patch.crates-io]
 bevy_reflect = { path = "/home/gibonus/code/gitimpo/bevy-4042/crates/bevy_reflect"}

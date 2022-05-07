@@ -197,7 +197,7 @@ mod test {
         // Swap two anonymous declarations
         let doc = "A 1111 {  C 111.0; D 11;}";
         let err = parse_kdl::<A>(doc).unwrap_err();
-        let mut err: Vec<_> = err.errors().map(|(s, e)| (&doc[s.range()], e)).collect();
+        let mut err: Vec<_> = err.errors().map(|e| (&doc[e.range()], &e.error)).collect();
         err.sort_by_key(|t| t.0);
         assert_eq!(err[0], ("C", &ty_err("D", "C")));
         assert_eq!(err[1], ("D", &ty_err("C", "D")));
@@ -206,9 +206,9 @@ mod test {
         // Wrong type on newtype with field access
         let doc = "A .x=2121 .d=220.0 .c=22;";
         let err = parse_kdl::<A>(doc).unwrap_err();
-        let mut err: Vec<_> = err.errors().map(|(s, e)| (&doc[s.range()], e)).collect();
+        let mut err: Vec<_> = err.errors().map(|e| (&doc[e.range()], &e.error)).collect();
         err.sort_by_key(|t| t.0);
-        assert!(matches!(err[0], ("22", &ConvertError::TypeMismatch { .. })));
+        assert!(matches!(err[0], ("22", ConvertError::TypeMismatch { .. })));
 
         // wrong type in homogenous list and maps
         let doc = r#"
@@ -216,8 +216,11 @@ mod test {
             .z .pi=3.14 .e=2.7182818 .large=999999 .tau=6.28 ln2=0.69314;  }"#;
         let err = parse_kdl::<G>(doc).unwrap_err();
         let mut err: Vec<_> = err.errors().collect();
-        err.sort_by_key(|t| t.0);
-        let err: Vec<_> = err.into_iter().map(|(s, e)| (&doc[s.range()], e)).collect();
+        err.sort_by_key(|t| t.offset());
+        let err: Vec<_> = err
+            .into_iter()
+            .map(|e| (&doc[e.range()], &e.error))
+            .collect();
         assert_eq!(err[0], ("12", &ty_err("alloc::string::String", "int(12)")));
         assert_eq!(err[1], ("12", &ConvertError::Access(NonHomoType)));
         assert_eq!(err[2], ("999999", &ty_err("f32", "int(999999)")));
