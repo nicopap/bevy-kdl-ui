@@ -16,19 +16,11 @@ pub(super) struct NodeSizes {
     // includes before_children & opening curly if children exist
     pub(super) entries: u32,
     pub(super) children: u32,
-    pub(super) trailing: u32,
-}
-impl NodeSizes {
-    pub(super) fn total(&self) -> u32 {
-        let NodeSizes { leading, ty, name, entries, children, trailing } = self;
-        leading + ty + name + entries + children + trailing
-    }
 }
 #[derive(Clone, Copy, Debug)]
 pub(super) struct DocumentSizes {
     pub(super) leading: u32,
     pub(super) nodes: u32,
-    pub(super) trailing: u32,
 }
 #[derive(Clone, Copy, Debug)]
 pub(super) struct EntrySizes {
@@ -36,13 +28,6 @@ pub(super) struct EntrySizes {
     pub(super) ty: u32,
     pub(super) name: u32,
     pub(super) value: u32,
-    pub(super) trailing: u32,
-}
-impl EntrySizes {
-    pub(super) fn total(&self) -> u32 {
-        let EntrySizes { leading, ty, name, value, trailing } = self;
-        leading + ty + name + value + trailing
-    }
 }
 
 trait AdhocLen {
@@ -99,7 +84,6 @@ impl OffsetExt for KdlNode {
             name: self.name().size(),
             entries: self.entries().size() + pre_children,
             children: self.children().map_or(0, |t| t.size() + 1),
-            trailing: self.trailing().size(),
         }
     }
 }
@@ -120,7 +104,6 @@ impl OffsetExt for KdlEntry {
             value: self
                 .value_repr()
                 .map_or(self.len() as u32 - remains, |t| t.size()),
-            trailing,
         }
     }
 }
@@ -130,7 +113,6 @@ impl OffsetExt for KdlDocument {
         DocumentSizes {
             leading: self.leading().size(),
             nodes: self.nodes().size(),
-            trailing: self.trailing().size(),
         }
     }
 }
@@ -176,7 +158,7 @@ impl<'a> SpannedDocument<'a> {
         let nodes_span = Span { offset, size: self.sizes.nodes };
         let nodes = self.document.nodes().iter().scan(offset, |offset, n| {
             let ret = Some(SpannedNode::new(n, *offset));
-            *offset += n.sizes().total();
+            *offset += n.size();
             ret
         });
         (nodes_span, nodes)
@@ -204,7 +186,7 @@ impl<'a> SpannedNode<'a> {
         let entries_span = Span { offset, size: entries };
         let entries = self.node.entries().iter().scan(offset, |offset, e| {
             let ret = Some(SpannedEntry::new(e, *offset));
-            *offset += e.sizes().total();
+            *offset += e.size();
             ret
         });
         (entries_span, entries)
