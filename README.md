@@ -99,3 +99,12 @@ verbose. I think the node-based nature of kdl helps reduce boilerplate
 a massive deal, and is specifically more 
 
 [bevy-proto]: https://github.com/mrgvsv/bevy_proto
+
+## License
+
+All crates in this repository are
+
+Copyright © 2022 Nicola Papale
+
+This software is licensed under either MIT or Apache 2.0 at your leisure. See
+LICENSE file for details.
