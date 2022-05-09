@@ -163,3 +163,4 @@ impl ConvertErrors {
     }
 }
 pub type ConvertResult<T> = Result<T, ConvertErrors>;
+pub(super) type ConvResult<T> = Result<T, ConvertError>;

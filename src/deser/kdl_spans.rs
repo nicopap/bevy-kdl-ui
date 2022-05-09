@@ -107,15 +107,6 @@ impl OffsetExt for KdlEntry {
         }
     }
 }
-impl OffsetExt for KdlDocument {
-    type Out = DocumentSizes;
-    fn sizes(&self) -> DocumentSizes {
-        DocumentSizes {
-            leading: self.leading().size(),
-            nodes: self.nodes().size(),
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct SpannedEntry<'a> {
@@ -128,10 +119,10 @@ impl<'a> SpannedEntry<'a> {
         let sizes = entry.sizes();
         Self { sizes, entry, offset }
     }
-    pub(super) fn name(&self) -> Option<(Span, &'a KdlIdentifier)> {
+    pub(super) fn name(&self) -> Option<(Span, &'a str)> {
         let EntrySizes { leading, ty, name, .. } = self.sizes;
         let name_span = Span { offset: self.offset + leading + ty, size: name };
-        self.entry.name().map(|n| (name_span, n))
+        self.entry.name().map(|n| (name_span, n.value()))
     }
     pub(super) fn value(&self) -> (Span, &'a KdlValue) {
         let EntrySizes { leading, ty, name, value, .. } = self.sizes;
@@ -145,23 +136,30 @@ impl<'a> SpannedEntry<'a> {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct SpannedDocument<'a> {
     document: &'a KdlDocument,
-    sizes: DocumentSizes,
-    offset: u32,
+    span: Span,
+    before_nodes: u32,
 }
 impl<'a> SpannedDocument<'a> {
-    pub(super) fn new(document: &'a KdlDocument, offset: u32) -> Self {
-        let sizes = document.sizes();
-        Self { sizes, document, offset }
+    pub(super) fn span(&self) -> Span {
+        self.span
     }
-    pub(super) fn nodes(&self) -> (Span, impl Iterator<Item = SpannedNode<'a>>) {
-        let offset = self.sizes.leading + self.offset;
-        let nodes_span = Span { offset, size: self.sizes.nodes };
+    pub(super) fn new(document: &'a KdlDocument, offset: u32) -> Self {
+        let size = document.len() as u32;
+        let before_nodes = document.leading().size();
+        let span = Span { offset, size };
+        Self { span, document, before_nodes }
+    }
+    pub(super) fn nodes(&self) -> impl Iterator<Item = SpannedNode<'a>> {
+        let offset = self.before_nodes + self.span.offset;
         let nodes = self.document.nodes().iter().scan(offset, |offset, n| {
             let ret = Some(SpannedNode::new(n, *offset));
             *offset += n.size();
             ret
         });
-        (nodes_span, nodes)
+        nodes
+    }
+    pub(super) fn node_count(&self) -> usize {
+        self.document.nodes().len()
     }
 }
 #[derive(Clone, Copy, Debug)]
@@ -175,10 +173,11 @@ impl<'a> SpannedNode<'a> {
         let sizes = node.sizes();
         Self { sizes, node, offset }
     }
-    pub(super) fn name(&self) -> (Span, &'a KdlIdentifier) {
+    pub(super) fn name(&self) -> (Span, &'a str) {
         let NodeSizes { leading, ty, name, .. } = self.sizes;
         let name_span = Span { offset: self.offset + leading + ty, size: name };
-        (name_span, self.node.name())
+        let name = self.node.name().value();
+        (name_span, name)
     }
     pub(super) fn entries(&self) -> (Span, impl Iterator<Item = SpannedEntry<'a>>) {
         let NodeSizes { leading, ty, name, entries, .. } = self.sizes;
@@ -191,15 +190,12 @@ impl<'a> SpannedNode<'a> {
         });
         (entries_span, entries)
     }
-    pub(super) fn children(&self) -> Option<(Span, SpannedDocument<'a>)> {
-        let NodeSizes { leading, ty, name, entries, children, .. } = self.sizes;
+    pub(super) fn children(&self) -> Option<SpannedDocument<'a>> {
+        let NodeSizes { leading, ty, name, entries, .. } = self.sizes;
         let offset = self.offset + leading + ty + name + entries;
-        let children_span = Span { offset, size: children };
-        let children = self
-            .node
+        self.node
             .children()
-            .map(|n| SpannedDocument::new(n, offset));
-        children.map(|c| (children_span, c))
+            .map(|n| SpannedDocument::new(n, offset))
     }
 }
 impl<'a> fmt::Display for SpannedNode<'a> {

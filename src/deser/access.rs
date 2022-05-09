@@ -3,8 +3,6 @@ use nonmax::NonMaxU8;
 use std::fmt;
 use thiserror::Error;
 
-use kdl::KdlIdentifier;
-
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
 pub struct Position(NonMaxU8);
 impl Position {
@@ -48,8 +46,7 @@ impl Field {
     fn wrong_access<T>(self, expected: Mode) -> Result<T, Error> {
         Err(Error::WrongMode { expected, actual: self })
     }
-    pub(super) fn from_ident(ident: &KdlIdentifier) -> Self {
-        let name = ident.value();
+    pub(super) fn from_name(name: &str) -> Self {
         match name.strip_prefix('.').map(str::parse::<u8>) {
             None => Self::Implicit,
             Some(Ok(index)) => Self::Positional(Position::new_u8(index)),

@@ -58,19 +58,25 @@ const KDL_DEFS: &[&str] = &[
     r#"Newtype 9000"#,
     r#"Newtype .0=9001"#,
     r#"NumberContainer .u8=255 .i32=-342334455 .u32=4294967295  .f32=31.3131 .f64=-3.14e-5 .usize=4294967295  .opt_f32=3.4323  .opt_i128=-103444434 "#,
-    r#"Bar .name="The jolly roger" {
+    r#"Miguel { 
+        .mig .weight=83.9 .name="Miguel Enríquez"
+    }
+    Bar .name="The jolly roger" {
         .waiter_names "Bill Bones" "Toothless Pete" "Musclemouth Mike" "Thunder Dave"
         .regulars {
             .pierre .weight=90.0 .name="Pierre Lafitte"
             .sam .weight=83.1 .name="Sam Hall Lord"
-            .fran .weight=79.9 .name="Frencisco de Miranda"
+            // Every nodes declared before the last one act as a template
+            // that expand to their content
+            Miguel
+            .fran .weight=79.9 .name="Francisco de Miranda"
         }
         // Notice how our ints are implicitly converted to VeryNewtype
         .newbies 1 2 3 4 5 6
     }"#,
     r#"Foo .name="西安" {
         // Tuples and tuple structs are anonymous
-        .coordinates 34.265 108.954
+        .coordinates .1=34.265 .0=108.954
         .populations 12953000 429496 1353000
         .notable_place "Terracota army" 
     }"#,
@@ -97,8 +103,8 @@ fn main() -> Result<()> {
         Vec<String>, u64, HashMap<String, VeryNewtype>,
     );
     for def in KDL_DEFS {
-        let node = def.parse().unwrap();
-        let reflect = convert_node(&node, &reg)?;
+        let doc = def.parse().unwrap();
+        let reflect = convert_doc(&doc, &reg)?;
         if let Some(m) = Newtype::from_reflect(reflect.as_ref()) {
             println!("Netype: {m:?}");
         } else if let Some(m) = NumberContainer::from_reflect(reflect.as_ref()) {

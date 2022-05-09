@@ -7,12 +7,13 @@ use bevy_reflect::Reflect;
 pub mod access;
 mod dyn_wrappers;
 mod err;
+mod fns;
 mod kdl_spans;
 mod span;
 mod visit;
 
 pub use err::{ConvertError, ConvertErrors, ConvertResult};
-pub use visit::convert_node;
+pub use visit::{convert_doc, convert_node};
 
 pub(super) type DynRefl = Box<dyn Reflect>;
 

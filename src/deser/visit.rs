@@ -2,25 +2,40 @@ use std::any::{self, TypeId};
 use std::fmt;
 use std::string::ToString;
 
+use crate::appendlist::AppendList;
 use bevy_reflect::{
     DynamicStruct, DynamicTuple, DynamicTupleStruct, Reflect, TypeIdentity, TypeInfo,
     TypeRegistration, TypeRegistry,
 };
-use kdl::{KdlNode, KdlValue};
+use kdl::{KdlDocument, KdlNode, KdlValue};
 
 use super::access::{self, Field};
 use super::dyn_wrappers::{Anon, HomoList, HomoMap, Rw, RwStruct};
-use super::err::SpannedError;
-use super::kdl_spans::{SpannedEntry, SpannedNode};
+use super::err::{ConvResult, SpannedError};
+use super::fns::{Binding, CallEntry, CallNode, Fdeclar};
+use super::kdl_spans::{SpannedDocument, SpannedNode};
 use super::span::Span;
 use super::{ConvertError, ConvertErrors, ConvertResult, DynRefl};
 
-type ConvResult<T> = Result<T, ConvertError>;
-
-pub fn convert_node(node: &KdlNode, reg: &TypeRegistry) -> ConvertResult<DynRefl> {
-    let spanned = SpannedNode::new(node, 0);
-    Context::parse_component(spanned, reg)
+pub fn convert_doc(doc: &KdlDocument, reg: &TypeRegistry) -> ConvertResult<DynRefl> {
+    let doc_repr = doc.to_string();
+    let spanned = SpannedDocument::new(doc, 0);
+    SimpleContext::parse_document(doc_repr, spanned, reg)
 }
+
+pub fn convert_node(node: &KdlNode, registry: &TypeRegistry) -> ConvertResult<DynRefl> {
+    let node_repr = node.to_string();
+    let spanned = SpannedNode::new(node, 0);
+    let list = AppendList::with_capacity(0);
+    let ctx = Context {
+        span: Span { offset: 0, size: node.len() as u32 },
+        bindings: &list,
+        errors: Vec::new(),
+        registry,
+    };
+    ctx.parse_component(node_repr, spanned)
+}
+
 /// A proxy for [`KdlValue`] that doesn't care about the format of declaration.
 enum KdlConcrete {
     Int(i64),
@@ -200,6 +215,7 @@ type FieldF<F> = fn(Field) -> Result<F, access::Error>;
 /// Get type registration from `reg` with provided `name`, also tries `short_name`.
 ///
 /// Returns `Err(NoSuchType)` if no type with provided `name` was registered.
+/// Returns `Ok(None)` if `name` starts with a `.`
 fn get_named<'r>(name: &str, reg: &'r TypeRegistry) -> ConvResult<Option<&'r TypeRegistration>> {
     if name.starts_with('.') {
         Ok(None)
@@ -210,29 +226,93 @@ fn get_named<'r>(name: &str, reg: &'r TypeRegistry) -> ConvResult<Option<&'r Typ
             .ok_or(ConvertError::NoSuchType(name.to_owned()))
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Offset(usize);
-struct Context<'r> {
+struct SimpleContext<'r> {
     span: Span,
     errors: Vec<SpannedError>,
     registry: &'r TypeRegistry,
 }
-impl<'r> Context<'r> {
-    fn parse_component(node: SpannedNode, registry: &'r TypeRegistry) -> ConvertResult<DynRefl> {
+impl<'r> SimpleContext<'r> {
+    fn parse_document<'s>(
+        full_source: String,
+        doc: SpannedDocument<'s>,
+        registry: &'r TypeRegistry,
+    ) -> ConvertResult<DynRefl> {
+        let mut ctx = Self { span: doc.span(), errors: Vec::new(), registry };
+        let mut nodes_remaining = doc.node_count();
+        let mut nodes = doc.nodes();
+        let bindings = AppendList::with_capacity(nodes_remaining - 1);
+        while let Some(node) = nodes.next() {
+            nodes_remaining -= 1;
+            if nodes_remaining == 0 {
+                return ctx
+                    .with_bindings(&bindings)
+                    .parse_component(full_source, node);
+            }
+            bindings
+                .push(ctx.read_declaration(node, &bindings))
+                .unwrap();
+        }
+        todo!("Empty KdlDocument")
+    }
+    fn read_span<T>(&mut self, (span, t): (Span, T)) -> T {
+        self.span = span;
+        t
+    }
+    // TODO: abstract this read_span, read_span_opt, add_error and error_resilitent
+    // crap
+    fn error_resilient<O, E, F>(&mut self, wrapped: F) -> Option<O>
+    where
+        F: FnOnce(&mut Self) -> Result<O, E>,
+        E: Into<ConvertError>,
+    {
+        match wrapped(self) {
+            Ok(v) => Some(v),
+            Err(err) => self.add_error(err.into()),
+        }
+    }
+    fn read_declaration<'s, 'i>(
+        &mut self,
+        node: SpannedNode<'s>,
+        bindings: &'i AppendList<Binding<'s, 'i>>,
+    ) -> Binding<'s, 'i> {
+        let name = self.read_span(node.name());
+        let declaration = self.error_resilient(|_| Fdeclar::new(node));
+        Binding::new(name, bindings.as_slice(), declaration)
+    }
+    fn with_bindings<'s, 'i>(
+        self,
+        bindings: &'i AppendList<Binding<'s, 'i>>,
+    ) -> Context<'r, 's, 'i> {
+        let SimpleContext { span, errors, registry } = self;
+        Context { span, bindings, errors, registry }
+    }
+    fn add_error<T>(&mut self, error: ConvertError) -> Option<T> {
+        self.errors.push(SpannedError::new(self.span, error));
+        None
+    }
+}
+struct Context<'r, 's, 'i> {
+    span: Span,
+    bindings: &'i AppendList<Binding<'s, 'i>>,
+    errors: Vec<SpannedError>,
+    registry: &'r TypeRegistry,
+}
+impl<'r, 's, 'i> Context<'r, 's, 'i> {
+    fn parse_component(
+        mut self,
+        full_source: String,
+        node: SpannedNode<'s>,
+    ) -> ConvertResult<DynRefl> {
         use ConvertError::BadComponentTypeName as BadType;
-        let (span, name) = node.name();
-        let mut ctx = Self { span, errors: Vec::new(), registry };
-        let err = || (node.to_string(), SpannedError::new(span, BadType));
-        let registration = get_named(name.value(), registry)
-            .map_err(|e| (node.to_string(), SpannedError::new(span, e)))?
-            .ok_or_else(err)?;
-
-        let ty_info = registration.type_info();
-        let result = ctx.dyn_compound(ty_info, node);
-        if let Some(Some(result)) = ctx.errors.is_empty().then(|| result) {
+        let name = self.read_span(node.name());
+        let regi = self.error_resilient(|s| get_named(name, s.registry)?.ok_or(BadType));
+        let node = CallNode::new(node, self.bindings.as_slice().into());
+        let dyn_for_regi = |r: &TypeRegistration| self.dyn_compound(r.type_info(), node);
+        let result = regi.and_then(dyn_for_regi);
+        if let Some(Some(result)) = self.errors.is_empty().then(|| result) {
             Ok(result)
         } else {
-            Err(ConvertErrors::new(node.to_string(), ctx.errors))
+            Err(ConvertErrors::new(full_source, self.errors))
         }
     }
     fn read_span<T>(&mut self, (span, t): (Span, T)) -> T {
@@ -267,30 +347,25 @@ impl<'r> Context<'r> {
         None
     }
 
-    fn entry2dyn<F, T>(
-        &mut self,
-        entry: SpannedEntry,
-        acc: &mut T,
-        get: FieldF<F>,
-    ) -> ConvResult<()>
+    fn entry2dyn<F, T>(&mut self, entry: CallEntry, acc: &mut T, get: FieldF<F>) -> ConvResult<()>
     where
         T: RwStruct<Field = F>,
     {
         use Field::Implicit;
         let field = self
             .read_span_opt(entry.name())
-            .map_or(Implicit, Field::from_ident);
+            .map_or(Implicit, Field::from_name);
         let make_value = move |ty_id: &TypeIdentity| self.dyn_value(ty_id, entry);
         acc.add_field(get(field)?, make_value)?;
         Ok(())
     }
-    fn node2dyn<F, T>(&mut self, node: SpannedNode, acc: &mut T, get: FieldF<F>) -> ConvResult<()>
+    fn node2dyn<F, T>(&mut self, node: CallNode, acc: &mut T, get: FieldF<F>) -> ConvResult<()>
     where
         T: RwStruct<Field = F>,
     {
         let name = self.read_span(node.name());
-        let field = Field::from_ident(name);
-        let actual = get_named(name.value(), self.registry);
+        let actual = get_named(name, self.registry);
+        let field = Field::from_name(name);
         let make_value = move |expected_id: &TypeIdentity| {
             let expected = self.registry.get(expected_id.type_id());
             let no_such_expected = || ConvertError::NoSuchType(expected_id.type_name().to_owned());
@@ -323,7 +398,7 @@ impl<'r> Context<'r> {
     fn read_fields_into<T, F, O>(
         &mut self,
         mut acc: T,
-        node: SpannedNode,
+        node: CallNode,
         get: FieldF<F>,
     ) -> Option<DynRefl>
     where
@@ -333,15 +408,15 @@ impl<'r> Context<'r> {
         for entry in self.read_span(node.entries()) {
             self.error_resilient(|s| s.entry2dyn(entry, &mut acc, get));
         }
-        if let Some(doc) = self.read_span_opt(node.children()) {
-            for inner in self.read_span(doc.nodes()) {
+        if let Some(doc) = node.children() {
+            for inner in doc.nodes() {
                 self.error_resilient(|s| s.node2dyn(inner, &mut acc, get));
             }
         }
         self.error_resilient(|_| acc.complete())
             .map(|v| Box::new(v) as DynRefl)
     }
-    fn dyn_value(&mut self, expected: &TypeIdentity, entry: SpannedEntry) -> Option<DynRefl> {
+    fn dyn_value(&mut self, expected: &TypeIdentity, entry: CallEntry) -> Option<DynRefl> {
         let value = self.read_span(entry.value());
         match KdlConcrete::from(value.clone()).dyn_value(expected, self.registry) {
             Ok(reflected) => Some(reflected),
@@ -350,11 +425,11 @@ impl<'r> Context<'r> {
     }
     /// Build the dynamic compound value based on `node`, which should be of
     /// type `ty_info`.
-    fn dyn_compound(&mut self, ty_info: &TypeInfo, node: SpannedNode) -> Option<DynRefl> {
+    fn dyn_compound(&mut self, ty_info: &TypeInfo, node: CallNode) -> Option<DynRefl> {
         use DeclarMode::{Anon as ModAnon, ByField};
         use TypeInfo::{List, Map, Struct, Tuple, TupleStruct, Value};
         let node_name = self.read_span(node.name());
-        let kdl_type = get_named(node_name.value(), self.registry);
+        let kdl_type = get_named(node_name, self.registry);
         let rust_type = ty_info.id();
         match kdl_type {
             Err(err) => self.add_error(err),
@@ -379,7 +454,7 @@ impl<'r> Context<'r> {
                 self.read_fields_into($wrap::<$acc, _, _>::new(name, info), node, $get)
             }};
         }
-        match (self.declar_of_node(node), ty_info) {
+        match (self.declar_of_node(&node), ty_info) {
             (ModAnon, Tuple(i)) => make_dyn!(Anon::<DynamicTuple>, i, |_| Ok(())),
             (ByField, Tuple(i)) => make_dyn!(Rw::<DynamicTuple>, i, Field::pos),
             (ModAnon, Struct(i)) => make_dyn!(Anon::<DynamicStruct>, i, |_| Ok(())),
@@ -407,15 +482,15 @@ impl<'r> Context<'r> {
     /// NOTE: if there is no fields, uses `Anon`. Empty struct (marker components)
     /// should be navigable.
     #[allow(unused_parens)]
-    fn declar_of_node(&mut self, node: SpannedNode) -> DeclarMode {
+    fn declar_of_node(&mut self, node: &CallNode) -> DeclarMode {
         use DeclarMode::{Anon, ByField};
         let ident_mode = |ident| {
-            let is_anon = Field::from_ident(ident).anon().is_ok();
+            let is_anon = Field::from_name(ident).anon().is_ok();
             (if is_anon { Anon } else { ByField })
         };
         let entry = self.read_span(node.entries()).next();
-        let doc = self.read_span_opt(node.children());
-        let first_node = doc.and_then(|d| self.read_span(d.nodes()).next());
+        let doc = node.children();
+        let first_node = doc.and_then(|d| d.nodes().next());
         entry
             .map(|e| self.read_span_opt(e.name()).map_or(Anon, ident_mode))
             .or_else(|| first_node.map(|n| ident_mode(self.read_span(n.name()))))
