@@ -12,10 +12,9 @@ use kdl::{KdlDocument, KdlNode, KdlValue};
 use super::access::{self, Field};
 use super::dyn_wrappers::{Anon, HomoList, HomoMap, Rw, RwStruct};
 use super::err::{ConvResult, SpannedError};
-use super::fns::{Binding, CallEntry, CallNode, Fdeclar};
-use super::kdl_spans::{SpannedDocument, SpannedNode};
-use super::span::Span;
 use super::{ConvertError, ConvertErrors, ConvertResult, DynRefl};
+use template_kdl::span::{Span, SpannedDocument, SpannedNode};
+use template_kdl::template::{Binding, CallEntry, CallNode, Fdeclar};
 
 pub fn convert_doc(doc: &KdlDocument, reg: &TypeRegistry) -> ConvertResult<DynRefl> {
     let doc_repr = doc.to_string();

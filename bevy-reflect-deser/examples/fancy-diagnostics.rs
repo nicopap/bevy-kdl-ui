@@ -1,5 +1,5 @@
-use bevy_kdl_scene::deser::*;
 use bevy_reflect::{FromReflect, Reflect, TypeRegistration, TypeRegistry};
+use bevy_reflect_deser::*;
 use bevy_utils::HashMap;
 use miette::Result;
 

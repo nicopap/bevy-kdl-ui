@@ -1,0 +1,14 @@
+[package]
+name = "template-kdl"
+authors = ["Nicola Papale"]
+description = "A KDL dialect with templates"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["markup"]
+repository = "https://github.com/nicopap/bevy-kdl-ui"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+thiserror = "1.0"
+kdl = "4.1"

@@ -4,18 +4,16 @@
 //! that it's possible to report more than a single error to the user.
 use bevy_reflect::Reflect;
 
-pub mod access;
+mod access;
+mod appendlist;
 mod dyn_wrappers;
 mod err;
-mod fns;
-mod kdl_spans;
-mod span;
 mod visit;
 
 pub use err::{ConvertError, ConvertErrors, ConvertResult};
 pub use visit::{convert_doc, convert_node};
 
-pub(super) type DynRefl = Box<dyn Reflect>;
+pub type DynRefl = Box<dyn Reflect>;
 
 #[cfg(test)]
 #[allow(unused)]

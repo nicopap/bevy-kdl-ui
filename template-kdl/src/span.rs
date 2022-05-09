@@ -4,30 +4,53 @@
 //! if every time I query for size, I have to walk through the entire
 //! document and check each value sizes and add up everything :/
 use std::fmt;
+use std::ops::Range;
 
-use super::span::Span;
 use kdl::{KdlDocument, KdlEntry, KdlIdentifier, KdlNode, KdlValue};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Span {
+    pub offset: u32,
+    pub size: u32,
+}
+impl fmt::Display for Span {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}..{}", self.offset, self.offset + self.size)
+    }
+}
+impl From<Span> for Range<usize> {
+    fn from(span: Span) -> Self {
+        (span.offset as usize)..(span.size + span.offset) as usize
+    }
+}
+impl Span {
+    pub fn range(&self) -> Range<usize> {
+        (*self).into()
+    }
+    pub fn pair(&self) -> (usize, usize) {
+        (self.offset as usize, self.size as usize)
+    }
+}
 #[derive(Clone, Copy, Debug)]
-pub(super) struct NodeSizes {
-    pub(super) leading: u32,
-    pub(super) ty: u32,
-    pub(super) name: u32,
+pub struct NodeSizes {
+    pub leading: u32,
+    pub ty: u32,
+    pub name: u32,
     // includes before_children & opening curly if children exist
-    pub(super) entries: u32,
-    pub(super) children: u32,
+    pub entries: u32,
+    pub children: u32,
 }
 #[derive(Clone, Copy, Debug)]
-pub(super) struct DocumentSizes {
-    pub(super) leading: u32,
-    pub(super) nodes: u32,
+pub struct DocumentSizes {
+    pub leading: u32,
+    pub nodes: u32,
 }
 #[derive(Clone, Copy, Debug)]
-pub(super) struct EntrySizes {
-    pub(super) leading: u32,
-    pub(super) ty: u32,
-    pub(super) name: u32,
-    pub(super) value: u32,
+pub struct EntrySizes {
+    pub leading: u32,
+    pub ty: u32,
+    pub name: u32,
+    pub value: u32,
 }
 
 trait AdhocLen {
@@ -69,7 +92,7 @@ impl AdhocLen for KdlNode {
     }
 }
 
-pub(super) trait OffsetExt {
+pub trait OffsetExt {
     type Out;
     fn sizes(&self) -> Self::Out;
 }
@@ -109,22 +132,22 @@ impl OffsetExt for KdlEntry {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct SpannedEntry<'a> {
+pub struct SpannedEntry<'a> {
     entry: &'a KdlEntry,
     sizes: EntrySizes,
     offset: u32,
 }
 impl<'a> SpannedEntry<'a> {
-    pub(super) fn new(entry: &'a KdlEntry, offset: u32) -> Self {
+    pub fn new(entry: &'a KdlEntry, offset: u32) -> Self {
         let sizes = entry.sizes();
         Self { sizes, entry, offset }
     }
-    pub(super) fn name(&self) -> Option<(Span, &'a str)> {
+    pub fn name(&self) -> Option<(Span, &'a str)> {
         let EntrySizes { leading, ty, name, .. } = self.sizes;
         let name_span = Span { offset: self.offset + leading + ty, size: name };
         self.entry.name().map(|n| (name_span, n.value()))
     }
-    pub(super) fn value(&self) -> (Span, &'a KdlValue) {
+    pub fn value(&self) -> (Span, &'a KdlValue) {
         let EntrySizes { leading, ty, name, value, .. } = self.sizes;
         let value_span = Span {
             offset: self.offset + leading + ty + name,
@@ -134,22 +157,22 @@ impl<'a> SpannedEntry<'a> {
     }
 }
 #[derive(Clone, Copy, Debug)]
-pub(super) struct SpannedDocument<'a> {
+pub struct SpannedDocument<'a> {
     document: &'a KdlDocument,
     span: Span,
     before_nodes: u32,
 }
 impl<'a> SpannedDocument<'a> {
-    pub(super) fn span(&self) -> Span {
+    pub fn span(&self) -> Span {
         self.span
     }
-    pub(super) fn new(document: &'a KdlDocument, offset: u32) -> Self {
+    pub fn new(document: &'a KdlDocument, offset: u32) -> Self {
         let size = document.len() as u32;
         let before_nodes = document.leading().size();
         let span = Span { offset, size };
         Self { span, document, before_nodes }
     }
-    pub(super) fn nodes(&self) -> impl Iterator<Item = SpannedNode<'a>> {
+    pub fn nodes(&self) -> impl Iterator<Item = SpannedNode<'a>> {
         let offset = self.before_nodes + self.span.offset;
         let nodes = self.document.nodes().iter().scan(offset, |offset, n| {
             let ret = Some(SpannedNode::new(n, *offset));
@@ -158,28 +181,28 @@ impl<'a> SpannedDocument<'a> {
         });
         nodes
     }
-    pub(super) fn node_count(&self) -> usize {
+    pub fn node_count(&self) -> usize {
         self.document.nodes().len()
     }
 }
 #[derive(Clone, Copy, Debug)]
-pub(super) struct SpannedNode<'a> {
+pub struct SpannedNode<'a> {
     node: &'a KdlNode,
     sizes: NodeSizes,
     offset: u32,
 }
 impl<'a> SpannedNode<'a> {
-    pub(super) fn new(node: &'a KdlNode, offset: u32) -> Self {
+    pub fn new(node: &'a KdlNode, offset: u32) -> Self {
         let sizes = node.sizes();
         Self { sizes, node, offset }
     }
-    pub(super) fn name(&self) -> (Span, &'a str) {
+    pub fn name(&self) -> (Span, &'a str) {
         let NodeSizes { leading, ty, name, .. } = self.sizes;
         let name_span = Span { offset: self.offset + leading + ty, size: name };
         let name = self.node.name().value();
         (name_span, name)
     }
-    pub(super) fn entries(&self) -> (Span, impl Iterator<Item = SpannedEntry<'a>>) {
+    pub fn entries(&self) -> (Span, impl Iterator<Item = SpannedEntry<'a>>) {
         let NodeSizes { leading, ty, name, entries, .. } = self.sizes;
         let offset = self.offset + leading + ty + name;
         let entries_span = Span { offset, size: entries };
@@ -190,7 +213,7 @@ impl<'a> SpannedNode<'a> {
         });
         (entries_span, entries)
     }
-    pub(super) fn children(&self) -> Option<SpannedDocument<'a>> {
+    pub fn children(&self) -> Option<SpannedDocument<'a>> {
         let NodeSizes { leading, ty, name, entries, .. } = self.sizes;
         let offset = self.offset + leading + ty + name + entries;
         self.node

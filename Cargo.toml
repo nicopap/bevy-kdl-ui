@@ -1,34 +1,8 @@
-[package]
-name = "bevy-kdl-scene"
-authors = ["Nicola Papale"]
-description = "A Bevy scene format using KDL"
-license = "Apache-2.0"
-readme = "Readme.md"
-keywords = ["bevy", "markup"]
-categories = ["game-development"]
-repository = "https://github.com/nicopap/bevy-kdl-scene"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = ["bevy-reflect-deser", "template-kdl"]
+resolver = "2"
 
-[features]
-fancy-errors = ["miette/fancy"]
-default = ["fancy-errors"]
-
-[dependencies]
-thiserror = "1.0"
-serde = "1.0"
-anyhow = "1.0"
-bevy_reflect = "0.8.0-dev"
-kdl = "4.1"
-nonmax = "0.5"
-miette = "4.6"
-
-[dev-dependencies]
-# For testing the hashmap reflection
-bevy_reflect = "0.8.0-dev"
-bevy_utils = "0.8.0-dev"
-miette = {version ="4.6", features=["fancy"]}
 
 [patch.crates-io]
-bevy_reflect = { path = "/home/gibonus/code/gitimpo/bevy-4042/crates/bevy_reflect"}
-bevy_utils = { path = "/home/gibonus/code/gitimpo/bevy-4042/crates/bevy_utils"}
+bevy_reflect = { git = "https://github.com/MrGVSV/bevy.git", branch="reflect-type-info"}
+bevy_utils = { git = "https://github.com/MrGVSV/bevy.git", branch="reflect-type-info"}

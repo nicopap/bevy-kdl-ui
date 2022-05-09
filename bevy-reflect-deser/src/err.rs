@@ -6,7 +6,7 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use super::access;
-use super::span::Span;
+use template_kdl::span::Span;
 
 mod miette_compat {
     #[cfg(feature = "fancy-errors")]
@@ -38,6 +38,8 @@ use miette_compat::*;
 pub enum ConvertError {
     #[error("This operation is unsupported: {0}")]
     GenericUnsupported(String),
+    #[error("Templating error: {0}")]
+    Template(#[from] template_kdl::err::Error),
     // TODO: store TypeId instead, and expected: Vec<TypeId>
     #[error("Kdl declaration has type `{actual}` but rust type `{expected}` was expected")]
     TypeMismatch { expected: String, actual: String },
@@ -72,7 +74,8 @@ impl ConvertError {
         };
         let representable = ["i8", "i16", "i32", "u8", "u16", "u32"];
         match self {
-            GenericUnsupported(_) =>Some("Please open an issue in the bevydle repository!".to_owned()),
+            Template(template) => template.help(),
+            GenericUnsupported(_) =>Some("This error is on the TODO list!".to_owned()),
             TypeMismatch { expected, .. } => Some(format!("You probably meant to declare a {expected}.")),
             IntDomain(i, ty) if representable.contains(ty) && *i > max_of(*ty) =>
                 Some(format!("{i} is larger than {}, the largest possible {ty}, try using a larger integer type.", max_of(ty))),

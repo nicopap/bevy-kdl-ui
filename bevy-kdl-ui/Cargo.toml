@@ -1,0 +1,30 @@
+[package]
+name = "bevy-kdl-ui"
+authors = ["Nicola Papale"]
+description = "Helpers for ergonomic UI in bevy"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["bevy", "markup"]
+categories = ["game-development"]
+repository = "https://github.com/nicopap/bevy-kdl-ui"
+version = "0.2.0"
+edition = "2021"
+
+[features]
+fancy-errors = ["miette/fancy"]
+default = []
+
+[dependencies]
+thiserror = "1.0"
+serde = "1.0"
+anyhow = "1.0"
+bevy_reflect = "0.8.0-dev"
+kdl = "4.1"
+nonmax = "0.5"
+miette = "4.6"
+
+[dev-dependencies]
+# For testing the hashmap reflection
+bevy_reflect = "0.8.0-dev"
+bevy_utils = "0.8.0-dev"
+miette = {version ="4.6", features=["fancy"]}

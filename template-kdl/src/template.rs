@@ -1,32 +1,42 @@
-//! `fn` nodes.
+//! Templates.
 //!
-//! A "function" node that binds a node name to an arbitrary transformation
-//! into another node. Whenever a node with the bound name is found, it will
-//! be transformed into the child node of the `fn` declaration. It is an
-//! error for `fn` nodes to have not exactly one child node.
+//! At first, I implemented nodes resulting from template application as a
+//! different kind of nodes.
 //!
-//! `fn` node entries are:
-//! * argument at position 1, `binding`: the name by which the function will be
-//!   refered later.
-//! * Any other entries: inputs to the function call to substitute into the child
-//!   node definition. Parameters enables default values.
-//! * All children but the last one also act like parameters, this let you define
-//!   default values for node arguments.
-//! ```kdl
-//! fn "binding" "arg1" "arg2" param1=default param2=default {
-//!   other_node {
-//!     arg1 "foo";
-//!     special_node arg2 param1;
-//!     // etc.
-//!   }
-//! }
-//! ```
+//! But it doesn't make sense! A "normal node" (ie: not in a template invocation)
+//! is the same as a node in a template invocation, but where the argument list
+//! is completely empty. So we basically have to replace the implementation of
+//! `Spanned*` to account for the new substitution environment.
 //!
-//! # `expand` node
+//! I struggled several day until I reached that conclusion. Which in turn made
+//! it real easy to finally implement templates.
 //!
-//! This node is only available in the context of a `fn` node. `expand foo` will expand
-//! the children of the argument foo into the encompassing document. `foo`'s arguments are
-//! discarded, only the children are kept.
+//! #### Variable scopping
+//!
+//! Now we introduced the concept of bindings and expensions, a few rules are
+//! necessary:
+//!
+//! * When recursively expanding templates, variables should be properly managed
+//! * When definining a `fn`, we should "capture" an immutable binding environment
+//!
+//! **binding set**: the set of variables that are declared and can be used in the
+//! current scope. The difficulty comes from the fact that the binding set at the
+//! call site of a template is different from the binding set at the declaration site.
+//! And when expanding the template with its parameter, we must use the declaration
+//! site binding set _for the body_, while using the call site binding set for the
+//! nodes passed as argument at the _call site_.
+//!
+//! This means the scope and which binding set is active is tied to which node we are
+//! looking at right now.
+//!
+//! At first I thought to add it to the `Context` struct in `visit.rs`, but a
+//! problem I was getting is that I can't "push" and "pop" the binding set into the
+//! context in a fool-proof way. I'll have to make sure everywhere I enter and leave
+//! a scope to manually add and remove the binding set from the stack.
+//!
+//! The `NodeThunk` pairs a binding set with a node, this way, when walking
+//! the node, the thunk will properly retrieve from the set the proper binding to
+//! expand correctly the node elements.
 // TODO: consider using a better hashmap implementation.
 use std::collections::HashMap;
 use std::fmt;
@@ -34,11 +44,8 @@ use std::rc::Rc;
 
 use kdl::KdlValue;
 
-use super::err::ConvResult;
-use super::kdl_spans::{SpannedDocument, SpannedEntry, SpannedNode};
-use super::span::Span;
-use super::ConvertError;
-use super::ConvertError::GenericUnsupported as TODO;
+use crate::err::{Error, Error::GenericUnsupported as TODO, Result};
+use crate::span::{Span, SpannedDocument, SpannedEntry, SpannedNode};
 
 #[derive(Debug)]
 enum FdefaultArg<'s> {
@@ -69,8 +76,8 @@ impl<'s> From<SpannedNode<'s>> for Fparameter<'s> {
     }
 }
 impl<'s> TryFrom<SpannedEntry<'s>> for Fparameter<'s> {
-    type Error = ConvertError;
-    fn try_from(entry: SpannedEntry<'s>) -> Result<Self, Self::Error> {
+    type Error = Error;
+    fn try_from(entry: SpannedEntry<'s>) -> Result<Self> {
         if let Some((name_span, name)) = entry.name() {
             Ok(Self { name, name_span, value: entry.value().into() })
         } else {
@@ -102,14 +109,14 @@ impl<'s, 'i> Farguments<'s, 'i> {
     }
 }
 #[derive(Debug)]
-pub(super) struct Fdeclar<'s> {
+pub struct Fdeclar<'s> {
     body: SpannedNode<'s>,
     params: Vec<Fparameter<'s>>,
 }
 impl<'s> Fdeclar<'s> {
     // TODO: define the DeclarError enum, and add it to the ConvError one.
     // TODO: should be able to return multiple errors
-    pub(super) fn new(node: SpannedNode<'s>) -> ConvResult<Self> {
+    pub fn new(node: SpannedNode<'s>) -> Result<Self> {
         let _ = node.name();
         let mut params = Vec::new();
         for entry in node.entries().1 {
@@ -156,7 +163,7 @@ impl<'s> Fdeclar<'s> {
 // TODO: a better API that hides Binding and Fdeclar
 /// A name binding. Later usages of this will cause an expension.
 #[derive(Debug)]
-pub(super) struct Binding<'s, 'i> {
+pub struct Binding<'s, 'i> {
     name: &'s str,
     /// Bindings at declaration site.
     bindings: &'i [Binding<'s, 'i>],
@@ -165,7 +172,7 @@ pub(super) struct Binding<'s, 'i> {
 }
 
 impl<'s, 'i> Binding<'s, 'i> {
-    pub(super) fn new(
+    pub fn new(
         name: &'s str,
         bindings: &'i [Binding<'s, 'i>],
         declaration: Option<Fdeclar<'s>>,
@@ -191,7 +198,7 @@ impl<'s, 'i> Binding<'s, 'i> {
 
 /// Context used to resolve the abstract nodes into actual nodes.
 #[derive(Clone)]
-pub(super) struct Bindings<'s, 'i> {
+pub struct Bindings<'s, 'i> {
     bindings: &'i [Binding<'s, 'i>],
     arguments: Rc<Farguments<'s, 'i>>,
 }
@@ -213,7 +220,7 @@ impl<'s, 'i> From<&'i [Binding<'s, 'i>]> for Bindings<'s, 'i> {
     }
 }
 
-pub(super) struct CallDocument<'s, 'i> {
+pub struct CallDocument<'s, 'i> {
     body: SpannedDocument<'s>,
     bindings: Bindings<'s, 'i>,
 }
@@ -222,7 +229,7 @@ impl<'s, 'i> CallDocument<'s, 'i> {
         Self { body, bindings }
     }
 
-    pub(super) fn nodes(&self) -> impl Iterator<Item = CallNode<'s, 'i>> {
+    pub fn nodes(&self) -> impl Iterator<Item = CallNode<'s, 'i>> {
         let bindings = self.bindings.clone();
         // TODO(PERF): find something slightly more efficient than comparing every node
         // name every encountered with all bindings.
@@ -233,7 +240,7 @@ impl<'s, 'i> CallDocument<'s, 'i> {
         self.body.nodes().map(with_param_expanded)
     }
 }
-pub(super) struct CallEntry<'s, 'i> {
+pub struct CallEntry<'s, 'i> {
     body: SpannedEntry<'s>,
     bindings: Bindings<'s, 'i>,
 }
@@ -242,35 +249,35 @@ impl<'s, 'i> CallEntry<'s, 'i> {
         Self { body, bindings }
     }
 
-    pub(super) fn name(&self) -> Option<(Span, &'s str)> {
+    pub fn name(&self) -> Option<(Span, &'s str)> {
         let (span, name) = self.body.name()?;
         Some(self.bindings.arguments.ident(name).unwrap_or((span, name)))
     }
-    pub(super) fn value(&self) -> (Span, &'s KdlValue) {
+    pub fn value(&self) -> (Span, &'s KdlValue) {
         let (s, v) = self.body.value();
         self.bindings.arguments.value(v).unwrap_or((s, v))
     }
 }
 #[derive(Clone)]
-pub(super) struct CallNode<'s, 'i> {
+pub struct CallNode<'s, 'i> {
     body: SpannedNode<'s>,
     bindings: Bindings<'s, 'i>,
 }
 impl<'s, 'i> CallNode<'s, 'i> {
-    pub(super) fn new(body: SpannedNode<'s>, bindings: Bindings<'s, 'i>) -> Self {
+    pub fn new(body: SpannedNode<'s>, bindings: Bindings<'s, 'i>) -> Self {
         Self { body, bindings }
     }
-    pub(super) fn name(&self) -> (Span, &'s str) {
+    pub fn name(&self) -> (Span, &'s str) {
         let (span, name) = self.body.name();
         self.bindings.arguments.ident(name).unwrap_or((span, name))
     }
-    pub(super) fn entries(&self) -> (Span, impl Iterator<Item = CallEntry<'s, 'i>>) {
+    pub fn entries(&self) -> (Span, impl Iterator<Item = CallEntry<'s, 'i>>) {
         let (span, entries) = self.body.entries();
         let args = self.bindings.clone();
         let entries = entries.map(move |body| CallEntry::new(body, args.clone()));
         (span, entries)
     }
-    pub(super) fn children(&self) -> Option<CallDocument<'s, 'i>> {
+    pub fn children(&self) -> Option<CallDocument<'s, 'i>> {
         let doc = self.body.children()?;
         Some(CallDocument::new(doc, self.bindings.clone()))
     }
