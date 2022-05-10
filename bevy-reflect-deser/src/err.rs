@@ -103,38 +103,6 @@ pub struct ConvertErrors {
     #[cfg_attr(feature = "fancy-errors", related)]
     pub(super) errors: Vec<SpannedError>,
 }
-#[cfg_attr(feature = "fancy-errors", derive(Diagnostic), diagnostic())]
-#[derive(Debug, PartialEq, Error)]
-#[error("{error}")]
-#[non_exhaustive]
-pub(super) struct SpannedError {
-    #[cfg_attr(feature = "fancy-errors", label)]
-    span: SourceSpan,
-
-    pub(super) error: ConvertError,
-
-    #[cfg(feature = "fancy-errors")]
-    #[help]
-    help: Option<String>,
-}
-impl SpannedError {
-    pub(super) fn new(span: Span, error: ConvertError) -> Self {
-        Self {
-            span: span.pair().into(),
-            #[cfg(feature = "fancy-errors")]
-            help: error.help(),
-            error,
-        }
-    }
-    pub(super) fn offset(&self) -> usize {
-        self.span.offset()
-    }
-    pub(super) fn range(&self) -> Range<usize> {
-        let start = self.span.offset();
-        let end = start + self.span.len();
-        start..end
-    }
-}
 impl From<(String, SpannedError)> for ConvertErrors {
     fn from((source_code, error): (String, SpannedError)) -> Self {
         Self { source_code, errors: vec![error] }
@@ -163,6 +131,44 @@ impl ConvertErrors {
     }
     pub(super) fn errors(&self) -> impl Iterator<Item = &SpannedError> {
         self.errors.iter()
+    }
+}
+
+#[cfg_attr(feature = "fancy-errors", derive(Diagnostic), diagnostic())]
+#[derive(Debug, PartialEq, Error)]
+#[error("{error}")]
+#[non_exhaustive]
+pub(super) struct SpannedError {
+    #[cfg_attr(feature = "fancy-errors", label)]
+    span: SourceSpan,
+
+    pub(super) error: ConvertError,
+
+    #[cfg(feature = "fancy-errors")]
+    #[help]
+    help: Option<String>,
+}
+impl From<(Span, ConvertError)> for SpannedError {
+    fn from((span, error): (Span, ConvertError)) -> Self {
+        Self::new(span, error)
+    }
+}
+impl SpannedError {
+    pub(super) fn new(span: Span, error: ConvertError) -> Self {
+        Self {
+            span: span.pair().into(),
+            #[cfg(feature = "fancy-errors")]
+            help: error.help(),
+            error,
+        }
+    }
+    pub(super) fn offset(&self) -> usize {
+        self.span.offset()
+    }
+    pub(super) fn range(&self) -> Range<usize> {
+        let start = self.span.offset();
+        let end = start + self.span.len();
+        start..end
     }
 }
 pub type ConvertResult<T> = Result<T, ConvertErrors>;

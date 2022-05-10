@@ -2,37 +2,32 @@ use std::any::{self, TypeId};
 use std::fmt;
 use std::string::ToString;
 
-use crate::appendlist::AppendList;
 use bevy_reflect::{
     DynamicStruct, DynamicTuple, DynamicTupleStruct, Reflect, TypeIdentity, TypeInfo,
     TypeRegistration, TypeRegistry,
 };
-use kdl::{KdlDocument, KdlNode, KdlValue};
+use kdl::{KdlDocument, KdlValue};
 
 use super::access::{self, Field};
 use super::dyn_wrappers::{Anon, HomoList, HomoMap, Rw, RwStruct};
 use super::err::{ConvResult, SpannedError};
 use super::{ConvertError, ConvertErrors, ConvertResult, DynRefl};
-use template_kdl::span::{Span, SpannedDocument, SpannedNode};
-use template_kdl::template::{Binding, CallEntry, CallNode, Fdeclar};
+use template_kdl::{
+    span::Span,
+    template::{EntryThunk, NodeThunk},
+};
 
-pub fn convert_doc(doc: &KdlDocument, reg: &TypeRegistry) -> ConvertResult<DynRefl> {
+pub fn convert_doc(doc: &KdlDocument, registry: &TypeRegistry) -> ConvertResult<DynRefl> {
     let doc_repr = doc.to_string();
-    let spanned = SpannedDocument::new(doc, 0);
-    SimpleContext::parse_document(doc_repr, spanned, reg)
-}
-
-pub fn convert_node(node: &KdlNode, registry: &TypeRegistry) -> ConvertResult<DynRefl> {
-    let node_repr = node.to_string();
-    let spanned = SpannedNode::new(node, 0);
-    let list = AppendList::with_capacity(0);
+    let (doc, errs) = template_kdl::read_document(doc);
+    let doc = doc.unwrap(); // TODO
+    let span = Span { offset: 0, size: doc_repr.len() as u32 };
     let ctx = Context {
-        span: Span { offset: 0, size: node.len() as u32 },
-        bindings: &list,
-        errors: Vec::new(),
+        span,
+        errors: errs.into_iter().map(|t| (span, t.into()).into()).collect(),
         registry,
     };
-    ctx.parse_component(node_repr, spanned)
+    ctx.parse_component(doc_repr, doc)
 }
 
 /// A proxy for [`KdlValue`] that doesn't care about the format of declaration.
@@ -225,87 +220,16 @@ fn get_named<'r>(name: &str, reg: &'r TypeRegistry) -> ConvResult<Option<&'r Typ
             .ok_or(ConvertError::NoSuchType(name.to_owned()))
     }
 }
-struct SimpleContext<'r> {
+struct Context<'r> {
     span: Span,
     errors: Vec<SpannedError>,
     registry: &'r TypeRegistry,
 }
-impl<'r> SimpleContext<'r> {
-    fn parse_document<'s>(
-        full_source: String,
-        doc: SpannedDocument<'s>,
-        registry: &'r TypeRegistry,
-    ) -> ConvertResult<DynRefl> {
-        let mut ctx = Self { span: doc.span(), errors: Vec::new(), registry };
-        let mut nodes_remaining = doc.node_count();
-        let mut nodes = doc.nodes();
-        let bindings = AppendList::with_capacity(nodes_remaining - 1);
-        while let Some(node) = nodes.next() {
-            nodes_remaining -= 1;
-            if nodes_remaining == 0 {
-                return ctx
-                    .with_bindings(&bindings)
-                    .parse_component(full_source, node);
-            }
-            bindings
-                .push(ctx.read_declaration(node, &bindings))
-                .unwrap();
-        }
-        todo!("Empty KdlDocument")
-    }
-    fn read_span<T>(&mut self, (span, t): (Span, T)) -> T {
-        self.span = span;
-        t
-    }
-    // TODO: abstract this read_span, read_span_opt, add_error and error_resilitent
-    // crap
-    fn error_resilient<O, E, F>(&mut self, wrapped: F) -> Option<O>
-    where
-        F: FnOnce(&mut Self) -> Result<O, E>,
-        E: Into<ConvertError>,
-    {
-        match wrapped(self) {
-            Ok(v) => Some(v),
-            Err(err) => self.add_error(err.into()),
-        }
-    }
-    fn read_declaration<'s, 'i>(
-        &mut self,
-        node: SpannedNode<'s>,
-        bindings: &'i AppendList<Binding<'s, 'i>>,
-    ) -> Binding<'s, 'i> {
-        let name = self.read_span(node.name());
-        let declaration = self.error_resilient(|_| Fdeclar::new(node));
-        Binding::new(name, bindings.as_slice(), declaration)
-    }
-    fn with_bindings<'s, 'i>(
-        self,
-        bindings: &'i AppendList<Binding<'s, 'i>>,
-    ) -> Context<'r, 's, 'i> {
-        let SimpleContext { span, errors, registry } = self;
-        Context { span, bindings, errors, registry }
-    }
-    fn add_error<T>(&mut self, error: ConvertError) -> Option<T> {
-        self.errors.push(SpannedError::new(self.span, error));
-        None
-    }
-}
-struct Context<'r, 's, 'i> {
-    span: Span,
-    bindings: &'i AppendList<Binding<'s, 'i>>,
-    errors: Vec<SpannedError>,
-    registry: &'r TypeRegistry,
-}
-impl<'r, 's, 'i> Context<'r, 's, 'i> {
-    fn parse_component(
-        mut self,
-        full_source: String,
-        node: SpannedNode<'s>,
-    ) -> ConvertResult<DynRefl> {
+impl<'r> Context<'r> {
+    fn parse_component(mut self, full_source: String, node: NodeThunk) -> ConvertResult<DynRefl> {
         use ConvertError::BadComponentTypeName as BadType;
         let name = self.read_span(node.name());
         let regi = self.error_resilient(|s| get_named(name, s.registry)?.ok_or(BadType));
-        let node = CallNode::new(node, self.bindings.as_slice().into());
         let dyn_for_regi = |r: &TypeRegistration| self.dyn_compound(r.type_info(), node);
         let result = regi.and_then(dyn_for_regi);
         if let Some(Some(result)) = self.errors.is_empty().then(|| result) {
@@ -346,7 +270,7 @@ impl<'r, 's, 'i> Context<'r, 's, 'i> {
         None
     }
 
-    fn entry2dyn<F, T>(&mut self, entry: CallEntry, acc: &mut T, get: FieldF<F>) -> ConvResult<()>
+    fn entry2dyn<F, T>(&mut self, entry: EntryThunk, acc: &mut T, get: FieldF<F>) -> ConvResult<()>
     where
         T: RwStruct<Field = F>,
     {
@@ -358,7 +282,7 @@ impl<'r, 's, 'i> Context<'r, 's, 'i> {
         acc.add_field(get(field)?, make_value)?;
         Ok(())
     }
-    fn node2dyn<F, T>(&mut self, node: CallNode, acc: &mut T, get: FieldF<F>) -> ConvResult<()>
+    fn node2dyn<F, T>(&mut self, node: NodeThunk, acc: &mut T, get: FieldF<F>) -> ConvResult<()>
     where
         T: RwStruct<Field = F>,
     {
@@ -397,7 +321,7 @@ impl<'r, 's, 'i> Context<'r, 's, 'i> {
     fn read_fields_into<T, F, O>(
         &mut self,
         mut acc: T,
-        node: CallNode,
+        node: NodeThunk,
         get: FieldF<F>,
     ) -> Option<DynRefl>
     where
@@ -407,15 +331,13 @@ impl<'r, 's, 'i> Context<'r, 's, 'i> {
         for entry in self.read_span(node.entries()) {
             self.error_resilient(|s| s.entry2dyn(entry, &mut acc, get));
         }
-        if let Some(doc) = node.children() {
-            for inner in doc.nodes() {
-                self.error_resilient(|s| s.node2dyn(inner, &mut acc, get));
-            }
+        for inner in node.children() {
+            self.error_resilient(|s| s.node2dyn(inner, &mut acc, get));
         }
         self.error_resilient(|_| acc.complete())
             .map(|v| Box::new(v) as DynRefl)
     }
-    fn dyn_value(&mut self, expected: &TypeIdentity, entry: CallEntry) -> Option<DynRefl> {
+    fn dyn_value(&mut self, expected: &TypeIdentity, entry: EntryThunk) -> Option<DynRefl> {
         let value = self.read_span(entry.value());
         match KdlConcrete::from(value.clone()).dyn_value(expected, self.registry) {
             Ok(reflected) => Some(reflected),
@@ -424,7 +346,7 @@ impl<'r, 's, 'i> Context<'r, 's, 'i> {
     }
     /// Build the dynamic compound value based on `node`, which should be of
     /// type `ty_info`.
-    fn dyn_compound(&mut self, ty_info: &TypeInfo, node: CallNode) -> Option<DynRefl> {
+    fn dyn_compound(&mut self, ty_info: &TypeInfo, node: NodeThunk) -> Option<DynRefl> {
         use DeclarMode::{Anon as ModAnon, ByField};
         use TypeInfo::{List, Map, Struct, Tuple, TupleStruct, Value};
         let node_name = self.read_span(node.name());
@@ -481,15 +403,14 @@ impl<'r, 's, 'i> Context<'r, 's, 'i> {
     /// NOTE: if there is no fields, uses `Anon`. Empty struct (marker components)
     /// should be navigable.
     #[allow(unused_parens)]
-    fn declar_of_node(&mut self, node: &CallNode) -> DeclarMode {
+    fn declar_of_node(&mut self, node: &NodeThunk) -> DeclarMode {
         use DeclarMode::{Anon, ByField};
         let ident_mode = |ident| {
             let is_anon = Field::from_name(ident).anon().is_ok();
             (if is_anon { Anon } else { ByField })
         };
         let entry = self.read_span(node.entries()).next();
-        let doc = node.children();
-        let first_node = doc.and_then(|d| d.nodes().next());
+        let first_node = node.children().next();
         entry
             .map(|e| self.read_span_opt(e.name()).map_or(Anon, ident_mode))
             .or_else(|| first_node.map(|n| ident_mode(self.read_span(n.name()))))

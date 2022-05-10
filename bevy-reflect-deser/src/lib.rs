@@ -5,13 +5,12 @@
 use bevy_reflect::Reflect;
 
 mod access;
-mod appendlist;
 mod dyn_wrappers;
 mod err;
 mod visit;
 
 pub use err::{ConvertError, ConvertErrors, ConvertResult};
-pub use visit::{convert_doc, convert_node};
+pub use visit::convert_doc;
 
 pub type DynRefl = Box<dyn Reflect>;
 
@@ -108,8 +107,7 @@ mod test {
         );
         register_more!((i128, f32, String, f32, u32), Option<u8>, Vec<String>, HashMap<String, f32>);
         let mut document: KdlDocument = text.parse().unwrap();
-        let mut node = document.nodes_mut().pop().unwrap();
-        convert_node(&mut node, &registry).map(|val| T::from_reflect(val.as_ref()).unwrap())
+        convert_doc(&document, &registry).map(|val| T::from_reflect(val.as_ref()).unwrap())
     }
     #[test]
     fn test_component() {

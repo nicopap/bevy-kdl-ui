@@ -45,11 +45,11 @@ See the relevant sections in the respective crate READMEs.
 - [X] proper span-based error reporting
 - [X] Spanned smart pointer that forces updating offset when accessing a Kdl type
 - [ ] Refactor
-  - [X] `fns` => `prefab`
+  - [X] `fns` => `template`
   - [ ] Make sure the documentation reflects the actual syntax
   - [X] `Call*` => `*Thunk`
-  - [ ] Formalize and document difference between `Context` and `Bindings`
-  - [ ] Rename `Bindings`
+  - [X] Formalize and document difference between `Context` and `Bindings`
+  - [X] Rename `Bindings`
   - [ ] Remove dependency on pointers, own shit so that it might be possible
     to use multiple files
 - [X] Resolve the "variable scopping" problem.
@@ -70,9 +70,12 @@ See the relevant sections in the respective crate READMEs.
 - [ ] Formalize and list the bevy-reflect-deser format.
 - [ ] Add the README example in bevy-reflect-deser to rustdoc.
 - [ ] rename `dyn_wrappers` in bevy-reflect-deser
-- [ ] Make bevy-reflect-deser independent from tempalte-kdl
+- [ ] ?? Make bevy-reflect-deser independent from tempalte-kdl
 - [ ] ?? Consider using "field:" instead of ".field" for performance (easier to remove from
   the end than the start)
+- [ ] ?? Consider having a generic template parser rather than one that depends on Kdl
+  it would just wrap another Deserializer.
+- [ ] Fix broken links in READMEs
 - [ ] Add "kdl markers" to nodes spawned, so that it might be eventually
   possible to round-trip the world, for 
 - [ ] Read and add to assets the last node in the kdl file

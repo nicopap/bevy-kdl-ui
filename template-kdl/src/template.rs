@@ -45,37 +45,37 @@ use std::rc::Rc;
 use kdl::KdlValue;
 
 use crate::err::{Error, Error::GenericUnsupported as TODO, Result};
-use crate::span::{Span, SpannedDocument, SpannedEntry, SpannedNode};
+use crate::span::{Span, SpannedEntry, SpannedNode};
 
 #[derive(Debug)]
-enum FdefaultArg<'s> {
+pub(crate) enum TdefaultArg<'s> {
     None,
     Value(Span, &'s KdlValue),
     Node(SpannedNode<'s>),
 }
-impl<'s> From<SpannedNode<'s>> for FdefaultArg<'s> {
+impl<'s> From<SpannedNode<'s>> for TdefaultArg<'s> {
     fn from(node: SpannedNode<'s>) -> Self {
         Self::Node(node)
     }
 }
-impl<'s> From<(Span, &'s KdlValue)> for FdefaultArg<'s> {
+impl<'s> From<(Span, &'s KdlValue)> for TdefaultArg<'s> {
     fn from((span, value): (Span, &'s KdlValue)) -> Self {
         Self::Value(span, value)
     }
 }
 #[derive(Debug)]
-struct Fparameter<'s> {
+pub(crate) struct Tparameter<'s> {
     name: &'s str,
     name_span: Span,
-    value: FdefaultArg<'s>,
+    value: TdefaultArg<'s>,
 }
-impl<'s> From<SpannedNode<'s>> for Fparameter<'s> {
+impl<'s> From<SpannedNode<'s>> for Tparameter<'s> {
     fn from(node: SpannedNode<'s>) -> Self {
         let (name_span, name) = node.name();
         Self { name, name_span, value: node.into() }
     }
 }
-impl<'s> TryFrom<SpannedEntry<'s>> for Fparameter<'s> {
+impl<'s> TryFrom<SpannedEntry<'s>> for Tparameter<'s> {
     type Error = Error;
     fn try_from(entry: SpannedEntry<'s>) -> Result<Self> {
         if let Some((name_span, name)) = entry.name() {
@@ -83,7 +83,7 @@ impl<'s> TryFrom<SpannedEntry<'s>> for Fparameter<'s> {
         } else {
             let (name_span, name) = entry.value();
             if let Some(name) = name.as_string() {
-                Ok(Self { name, name_span, value: FdefaultArg::None })
+                Ok(Self { name, name_span, value: TdefaultArg::None })
             } else {
                 Err(TODO("Bad function parameter".to_owned()))
             }
@@ -91,32 +91,32 @@ impl<'s> TryFrom<SpannedEntry<'s>> for Fparameter<'s> {
     }
 }
 #[derive(Default)]
-struct Farguments<'s, 'i> {
+pub(crate) struct Targuments<'s> {
     values: HashMap<&'s str, (Span, &'s KdlValue)>,
-    nodes: HashMap<&'s str, CallNode<'s, 'i>>,
+    nodes: HashMap<&'s str, NodeThunk<'s>>,
 }
-impl<'s, 'i> Farguments<'s, 'i> {
-    fn value(&self, key: &KdlValue) -> Option<(Span, &'s KdlValue)> {
+impl<'s> Targuments<'s> {
+    pub(crate) fn value(&self, key: &KdlValue) -> Option<(Span, &'s KdlValue)> {
         let key = key.as_string()?;
         self.values.get(key).cloned()
     }
-    fn ident(&self, key: &str) -> Option<(Span, &'s str)> {
+    pub(crate) fn ident(&self, key: &str) -> Option<(Span, &'s str)> {
         let (s, v) = self.values.get(key)?;
         v.as_string().map(|v| (*s, v))
     }
-    fn node(&self, key: &str) -> Option<&CallNode<'s, 'i>> {
+    pub(crate) fn node(&self, key: &str) -> Option<&NodeThunk<'s>> {
         self.nodes.get(key)
     }
 }
 #[derive(Debug)]
-pub struct Fdeclar<'s> {
+pub(crate) struct Declaration<'s> {
     body: SpannedNode<'s>,
-    params: Vec<Fparameter<'s>>,
+    params: Vec<Tparameter<'s>>,
 }
-impl<'s> Fdeclar<'s> {
+impl<'s> Declaration<'s> {
     // TODO: define the DeclarError enum, and add it to the ConvError one.
     // TODO: should be able to return multiple errors
-    pub fn new(node: SpannedNode<'s>) -> Result<Self> {
+    pub(crate) fn new(node: SpannedNode<'s>) -> Result<Self> {
         let _ = node.name();
         let mut params = Vec::new();
         for entry in node.entries().1 {
@@ -133,58 +133,74 @@ impl<'s> Fdeclar<'s> {
             }
             params.push(node.into());
         }
-        Err(TODO(
-            "declaration node should have at least 1 child".to_owned(),
-        ))
+        Err(no_child())
     }
-    fn arguments<'i>(
+    /// Transform tparameters into targuments as specified at `call` site.
+    pub(crate) fn arguments(
         &self,
-        _invocation: CallNode<'s, 'i>,
-        bindings: &'i [Binding<'s, 'i>],
-    ) -> Farguments<'s, 'i> {
+        _call: NodeThunk<'s>,
+        binding_index: usize,
+        bindings: Rc<[Binding<'s>]>,
+    ) -> Targuments<'s> {
         // TODO: clean this up, maybe use RwStruct
         // TODO FIXME: currently just transparently passes the default values
         let mut values = HashMap::default();
         let mut nodes = HashMap::default();
         for param in self.params.iter() {
             match param.value {
-                FdefaultArg::Node(n) => {
-                    nodes.insert(param.name, CallNode::new(n, bindings.into()));
+                TdefaultArg::Node(n) => {
+                    let context = Context {
+                        binding_index,
+                        bindings: bindings.clone(),
+                        arguments: Rc::new(Targuments::default()),
+                    };
+                    nodes.insert(param.name, NodeThunk::new(n, context));
                 }
-                FdefaultArg::Value(s, v) => {
+                TdefaultArg::Value(s, v) => {
                     values.insert(param.name, (s, v));
                 }
-                FdefaultArg::None => {}
+                TdefaultArg::None => {}
             }
         }
-        Farguments { values, nodes }
+        Targuments { values, nodes }
     }
 }
-// TODO: a better API that hides Binding and Fdeclar
 /// A name binding. Later usages of this will cause an expension.
 #[derive(Debug)]
-pub struct Binding<'s, 'i> {
+pub(crate) struct Binding<'s> {
     name: &'s str,
-    /// Bindings at declaration site.
-    bindings: &'i [Binding<'s, 'i>],
+    /// Index of highest binding.
+    binding_index: usize,
     /// the declaration itself. None if it was malformed.
-    declaration: Option<Fdeclar<'s>>,
+    declaration: Option<Declaration<'s>>,
 }
 
-impl<'s, 'i> Binding<'s, 'i> {
-    pub fn new(
+impl<'s> Binding<'s> {
+    pub(crate) fn new(
+        binding_index: usize,
         name: &'s str,
-        bindings: &'i [Binding<'s, 'i>],
-        declaration: Option<Fdeclar<'s>>,
+        declaration: Option<Declaration<'s>>,
     ) -> Self {
-        Self { name, declaration, bindings }
+        Self { name, declaration, binding_index }
     }
-    fn expand(&self, invocation: CallNode<'s, 'i>) -> Option<CallNode<'s, 'i>> {
+    pub(crate) fn expand(
+        &self,
+        invocation: NodeThunk<'s>,
+        bindings: Rc<[Binding<'s>]>,
+    ) -> Option<NodeThunk<'s>> {
         if self.name == invocation.name().1 {
             if let Some(declaration) = &self.declaration {
-                let arguments = Rc::new(declaration.arguments(invocation, self.bindings));
-                let bindings = Bindings { arguments, bindings: self.bindings };
-                Some(CallNode { bindings, body: declaration.body })
+                let arguments = Rc::new(declaration.arguments(
+                    invocation,
+                    self.binding_index,
+                    bindings.clone(),
+                ));
+                let context = Context {
+                    arguments,
+                    bindings,
+                    binding_index: self.binding_index,
+                };
+                Some(NodeThunk { context, body: declaration.body })
             } else {
                 // TODO: ideally: keep the initial invocation if error, so that it's
                 // possible to diagnose errors even in it.
@@ -198,91 +214,85 @@ impl<'s, 'i> Binding<'s, 'i> {
 
 /// Context used to resolve the abstract nodes into actual nodes.
 #[derive(Clone)]
-pub struct Bindings<'s, 'i> {
-    bindings: &'i [Binding<'s, 'i>],
-    arguments: Rc<Farguments<'s, 'i>>,
+pub(crate) struct Context<'s> {
+    binding_index: usize,
+    bindings: Rc<[Binding<'s>]>,
+    arguments: Rc<Targuments<'s>>,
 }
 
-impl<'s, 'i> Bindings<'s, 'i> {
-    fn expand(&self, invocation: CallNode<'s, 'i>) -> Option<CallNode<'s, 'i>> {
-        self.bindings
-            .iter()
-            .rev()
-            .find_map(|b| b.expand(invocation.clone()))
-    }
-}
-impl<'s, 'i> From<&'i [Binding<'s, 'i>]> for Bindings<'s, 'i> {
-    fn from(bindings: &'i [Binding<'s, 'i>]) -> Self {
+impl<'s> Context<'s> {
+    pub(crate) fn new(bindings: Rc<[Binding<'s>]>) -> Self {
+        let binding_index = bindings.len();
         Self {
             bindings,
-            arguments: Rc::new(Farguments::default()),
+            binding_index,
+            arguments: Rc::new(Targuments::default()),
         }
     }
-}
-
-pub struct CallDocument<'s, 'i> {
-    body: SpannedDocument<'s>,
-    bindings: Bindings<'s, 'i>,
-}
-impl<'s, 'i> CallDocument<'s, 'i> {
-    fn new(body: SpannedDocument<'s>, bindings: Bindings<'s, 'i>) -> Self {
-        Self { body, bindings }
-    }
-
-    pub fn nodes(&self) -> impl Iterator<Item = CallNode<'s, 'i>> {
-        let bindings = self.bindings.clone();
-        // TODO(PERF): find something slightly more efficient than comparing every node
-        // name every encountered with all bindings.
-        let with_param_expanded = move |body: SpannedNode<'s>| {
-            let body = CallNode::new(body, bindings.clone());
-            bindings.expand(body.clone()).unwrap_or(body)
-        };
-        self.body.nodes().map(with_param_expanded)
+    pub(crate) fn expand(&self, invocation: NodeThunk<'s>) -> Option<NodeThunk<'s>> {
+        self.bindings
+            .get(0..self.binding_index)
+            .unwrap()
+            .iter()
+            .rev()
+            .find_map(|b| b.expand(invocation.clone(), self.bindings.clone()))
     }
 }
-pub struct CallEntry<'s, 'i> {
+
+pub struct EntryThunk<'s> {
     body: SpannedEntry<'s>,
-    bindings: Bindings<'s, 'i>,
+    context: Context<'s>,
 }
-impl<'s, 'i> CallEntry<'s, 'i> {
-    fn new(body: SpannedEntry<'s>, bindings: Bindings<'s, 'i>) -> Self {
-        Self { body, bindings }
+impl<'s> EntryThunk<'s> {
+    pub(crate) fn new(body: SpannedEntry<'s>, context: Context<'s>) -> Self {
+        Self { body, context }
     }
 
+    // TODO: do not replace names
     pub fn name(&self) -> Option<(Span, &'s str)> {
         let (span, name) = self.body.name()?;
-        Some(self.bindings.arguments.ident(name).unwrap_or((span, name)))
+        Some(self.context.arguments.ident(name).unwrap_or((span, name)))
     }
     pub fn value(&self) -> (Span, &'s KdlValue) {
         let (s, v) = self.body.value();
-        self.bindings.arguments.value(v).unwrap_or((s, v))
+        self.context.arguments.value(v).unwrap_or((s, v))
     }
 }
 #[derive(Clone)]
-pub struct CallNode<'s, 'i> {
+pub struct NodeThunk<'s> {
     body: SpannedNode<'s>,
-    bindings: Bindings<'s, 'i>,
+    context: Context<'s>,
 }
-impl<'s, 'i> CallNode<'s, 'i> {
-    pub fn new(body: SpannedNode<'s>, bindings: Bindings<'s, 'i>) -> Self {
-        Self { body, bindings }
+impl<'s> NodeThunk<'s> {
+    pub(crate) fn new(body: SpannedNode<'s>, context: Context<'s>) -> Self {
+        Self { body, context }
     }
     pub fn name(&self) -> (Span, &'s str) {
         let (span, name) = self.body.name();
-        self.bindings.arguments.ident(name).unwrap_or((span, name))
+        self.context.arguments.ident(name).unwrap_or((span, name))
     }
-    pub fn entries(&self) -> (Span, impl Iterator<Item = CallEntry<'s, 'i>>) {
+    pub fn entries(&self) -> (Span, impl Iterator<Item = EntryThunk<'s>>) {
         let (span, entries) = self.body.entries();
-        let args = self.bindings.clone();
-        let entries = entries.map(move |body| CallEntry::new(body, args.clone()));
+        let args = self.context.clone();
+        // TODO: move Entry expension here
+        let entries = entries.map(move |body| EntryThunk::new(body, args.clone()));
         (span, entries)
     }
-    pub fn children(&self) -> Option<CallDocument<'s, 'i>> {
-        let doc = self.body.children()?;
-        Some(CallDocument::new(doc, self.bindings.clone()))
+    pub fn children(&self) -> impl Iterator<Item = NodeThunk<'s>> {
+        let context = self.context.clone();
+        // TODO(PERF): find something slightly more efficient than comparing every node
+        // name every encountered with all bindings.
+        let with_param_expanded = move |body: SpannedNode<'s>| {
+            let body = NodeThunk::new(body, context.clone());
+            context.expand(body.clone()).unwrap_or(body)
+        };
+        let doc = self.body.children();
+        doc.into_iter()
+            .flat_map(|d| d.nodes())
+            .map(with_param_expanded)
     }
 }
-impl<'s, 'i> fmt::Display for CallNode<'s, 'i> {
+impl<'s> fmt::Display for NodeThunk<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.body)
     }

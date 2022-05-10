@@ -11,4 +11,5 @@ edition = "2021"
 
 [dependencies]
 thiserror = "1.0"
+serde = "1.0"
 kdl = "4.1"
