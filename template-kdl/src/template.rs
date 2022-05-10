@@ -37,6 +37,16 @@
 //! The `NodeThunk` pairs a binding set with a node, this way, when walking
 //! the node, the thunk will properly retrieve from the set the proper binding to
 //! expand correctly the node elements.
+//!
+//! ## `bindings` & `binding_index`
+//!
+//! We used to store the bind set as a reference to a slice. It is now an index +
+//! a RC to a slice (which I now doubt is any better..)
+//!
+//! This let us take ownership of the slice and hopefully move toward sharable
+//! definitions. It also enable us to share the slice between many nodes without
+//! having recourse to `unsafe`, and thus we can get rid of `appendlist` which was
+//! unsound.
 // TODO: consider using a better hashmap implementation.
 use std::collections::HashMap;
 use std::fmt;
@@ -66,24 +76,23 @@ impl<'s> From<(Span, &'s KdlValue)> for TdefaultArg<'s> {
 #[derive(Debug)]
 pub(crate) struct Tparameter<'s> {
     name: &'s str,
-    name_span: Span,
     value: TdefaultArg<'s>,
 }
 impl<'s> From<SpannedNode<'s>> for Tparameter<'s> {
     fn from(node: SpannedNode<'s>) -> Self {
-        let (name_span, name) = node.name();
-        Self { name, name_span, value: node.into() }
+        let (_, name) = node.name();
+        Self { name, value: node.into() }
     }
 }
 impl<'s> TryFrom<SpannedEntry<'s>> for Tparameter<'s> {
     type Error = Error;
     fn try_from(entry: SpannedEntry<'s>) -> Result<Self> {
-        if let Some((name_span, name)) = entry.name() {
-            Ok(Self { name, name_span, value: entry.value().into() })
+        if let Some((_, name)) = entry.name() {
+            Ok(Self { name, value: entry.value().into() })
         } else {
-            let (name_span, name) = entry.value();
+            let (_, name) = entry.value();
             if let Some(name) = name.as_string() {
-                Ok(Self { name, name_span, value: TdefaultArg::None })
+                Ok(Self { name, value: TdefaultArg::None })
             } else {
                 Err(TODO("Bad function parameter".to_owned()))
             }
@@ -125,8 +134,7 @@ impl<'s> Declaration<'s> {
         let no_child = || TODO("declaration node should have at least 1 child".to_owned());
         let doc = node.children().ok_or_else(no_child)?;
         let mut nodes_remaining = doc.node_count();
-        let mut nodes = doc.nodes();
-        while let Some(node) = nodes.next() {
+        for node in doc.nodes() {
             nodes_remaining -= 1;
             if nodes_remaining == 0 {
                 return Ok(Self { body: node, params });
@@ -139,7 +147,7 @@ impl<'s> Declaration<'s> {
     pub(crate) fn arguments(
         &self,
         _call: NodeThunk<'s>,
-        binding_index: usize,
+        binding_index: u16,
         bindings: Rc<[Binding<'s>]>,
     ) -> Targuments<'s> {
         // TODO: clean this up, maybe use RwStruct
@@ -170,14 +178,14 @@ impl<'s> Declaration<'s> {
 pub(crate) struct Binding<'s> {
     name: &'s str,
     /// Index of highest binding.
-    binding_index: usize,
+    binding_index: u16,
     /// the declaration itself. None if it was malformed.
     declaration: Option<Declaration<'s>>,
 }
 
 impl<'s> Binding<'s> {
     pub(crate) fn new(
-        binding_index: usize,
+        binding_index: u16,
         name: &'s str,
         declaration: Option<Declaration<'s>>,
     ) -> Self {
@@ -215,14 +223,14 @@ impl<'s> Binding<'s> {
 /// Context used to resolve the abstract nodes into actual nodes.
 #[derive(Clone)]
 pub(crate) struct Context<'s> {
-    binding_index: usize,
+    binding_index: u16,
     bindings: Rc<[Binding<'s>]>,
     arguments: Rc<Targuments<'s>>,
 }
 
 impl<'s> Context<'s> {
     pub(crate) fn new(bindings: Rc<[Binding<'s>]>) -> Self {
-        let binding_index = bindings.len();
+        let binding_index = bindings.len() as u16;
         Self {
             bindings,
             binding_index,
@@ -230,9 +238,7 @@ impl<'s> Context<'s> {
         }
     }
     pub(crate) fn expand(&self, invocation: NodeThunk<'s>) -> Option<NodeThunk<'s>> {
-        self.bindings
-            .get(0..self.binding_index)
-            .unwrap()
+        self.bindings[0..self.binding_index as usize]
             .iter()
             .rev()
             .find_map(|b| b.expand(invocation.clone(), self.bindings.clone()))

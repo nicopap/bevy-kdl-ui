@@ -24,9 +24,6 @@ impl From<Span> for Range<usize> {
     }
 }
 impl Span {
-    pub(crate) fn range(&self) -> Range<usize> {
-        (*self).into()
-    }
     pub fn pair(&self) -> (usize, usize) {
         (self.offset as usize, self.size as usize)
     }
@@ -38,12 +35,6 @@ pub(crate) struct NodeSizes {
     pub(crate) name: u32,
     // includes before_children & opening curly if children exist
     pub(crate) entries: u32,
-    pub(crate) children: u32,
-}
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct DocumentSizes {
-    pub(crate) leading: u32,
-    pub(crate) nodes: u32,
 }
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct EntrySizes {
@@ -106,7 +97,6 @@ impl OffsetExt for KdlNode {
             ty: self.ty().map_or(0, |t| t.size() + 2),
             name: self.name().size(),
             entries: self.entries().size() + pre_children,
-            children: self.children().map_or(0, |t| t.size() + 1),
         }
     }
 }
@@ -163,9 +153,6 @@ pub(crate) struct SpannedDocument<'a> {
     before_nodes: u32,
 }
 impl<'a> SpannedDocument<'a> {
-    pub(crate) fn span(&self) -> Span {
-        self.span
-    }
     pub(crate) fn new(document: &'a KdlDocument, offset: u32) -> Self {
         let size = document.len() as u32;
         let before_nodes = document.leading().size();

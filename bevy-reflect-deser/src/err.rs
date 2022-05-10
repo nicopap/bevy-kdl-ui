@@ -1,5 +1,4 @@
 use std::fmt::Write;
-use std::ops::Range;
 
 #[cfg(feature = "fancy-errors")]
 use miette::Diagnostic;
@@ -129,6 +128,7 @@ impl ConvertErrors {
         }
         ret
     }
+    #[cfg(test)]
     pub(super) fn errors(&self) -> impl Iterator<Item = &SpannedError> {
         self.errors.iter()
     }
@@ -162,10 +162,12 @@ impl SpannedError {
             error,
         }
     }
+    #[cfg(test)]
     pub(super) fn offset(&self) -> usize {
         self.span.offset()
     }
-    pub(super) fn range(&self) -> Range<usize> {
+    #[cfg(test)]
+    pub(super) fn range(&self) -> std::ops::Range<usize> {
         let start = self.span.offset();
         let end = start + self.span.len();
         start..end

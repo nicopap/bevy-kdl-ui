@@ -31,7 +31,7 @@ impl<'de> TemplateKdlDeserializer<'de> {
                     None
                 }
             };
-            bindings.push(Binding::new(i, name, declaration));
+            bindings.push(Binding::new(i as u16, name, declaration));
         };
         let context = Context::new(bindings.into());
         let thunk = NodeThunk::new(last_node, context);
