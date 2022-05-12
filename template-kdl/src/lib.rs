@@ -1,47 +1,35 @@
 pub mod err;
+pub mod multi_err;
 pub mod span;
 pub mod template;
 
 use kdl::KdlDocument;
-use span::SpannedDocument;
-use template::{Binding, Context, Declaration, NodeThunk};
 
-struct TemplateKdlDeserializer<'doc> {
-    thunk: NodeThunk<'doc>,
-    errors: Vec<err::Error>,
-}
-impl<'de> TemplateKdlDeserializer<'de> {
-    fn new(document: &'de KdlDocument) -> err::Result<Self> {
-        let doc = SpannedDocument::new(document, 0);
-        let mut errors = Vec::new();
-        let mut nodes_remaining = doc.node_count() as isize;
-        let mut nodes = doc.nodes().enumerate();
-        let mut bindings = Vec::new();
-        let (_, last_node) = loop {
-            nodes_remaining -= 1;
-            if nodes_remaining <= 0 {
-                break nodes.next().ok_or(err::Error::Empty)?;
-            }
-            let (i, node) = nodes.next().unwrap();
-            let (_, name) = node.name();
-            let declaration = match Declaration::new(node) {
-                Ok(ok) => Some(ok),
-                Err(err) => {
-                    errors.push(err);
-                    None
-                }
-            };
-            bindings.push(Binding::new(i as u16, name, declaration));
-        };
-        let context = Context::new(bindings.into());
-        let thunk = NodeThunk::new(last_node, context);
-        Ok(Self { errors, thunk })
+use err::Error;
+use multi_err::{MultiError, MultiErrorTrait, MultiResult};
+use span::{Span, Spanned, SpannedDocument};
+use template::{Binding, Context, NodeThunk};
+
+fn read_thunk(document: &KdlDocument) -> MultiResult<NodeThunk, Spanned<Error>> {
+    let doc_len = document.len() as u32;
+    let doc = SpannedDocument::new(document, 0);
+    let mut errors = MultiError::default();
+    let node_count = doc.node_count();
+    if node_count == 0 {
+        let err = Spanned(Span { offset: 0, size: doc_len }, err::Error::Empty);
+        return errors.into_errors(err);
     }
+    let mut all_nodes = doc.nodes().enumerate();
+    let binding_nodes = all_nodes.by_ref().take(node_count - 1);
+    let (bindings, binding_errors): (Vec<_>, Vec<_>) = binding_nodes
+        .map(|(i, node)| Binding::new(i as u16, node))
+        .unzip();
+    errors.extend_errors(binding_errors.into_iter().flatten());
+    let (_, last_node) = all_nodes.next().unwrap();
+    let context = Context::new(bindings.into());
+    errors.into_result(NodeThunk::new(last_node, context))
 }
 
-pub fn read_document(document: &KdlDocument) -> (Option<NodeThunk>, Vec<err::Error>) {
-    match TemplateKdlDeserializer::new(document) {
-        Ok(deser) => (Some(deser.thunk), deser.errors),
-        Err(err) => (None, vec![err]),
-    }
+pub fn read_document(document: &KdlDocument) -> (Option<NodeThunk>, Vec<Spanned<err::Error>>) {
+    read_thunk(document).into_tuple()
 }

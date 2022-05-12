@@ -123,10 +123,11 @@ NodeName parameter_name="parameter_value" "argument" {
 There are two types of declarations in `bevy-reflect-deser`:
 1. "Top level" declaration: the *node name* is **required** to be a registered
    dynamic type. Otherwise it's impossible to know what we are trying to parse.
-2. "nested" declaration: Within a struct with an already known type, the *node
-   name* is not really relevant. It either represents a field of the parent
-   node, is elided by declaring it as `-` or is the name of a type. In the 3rd
-   case, type checking will ensure the name corresponds to what is expected.
+2. "Nested" declaration: Within a struct with an already known type, the *node
+   name* is only relevant when the parent node requires named field. If the
+  parent node explicitly requires an unnamed field, you **must** use a `-` as
+  node name, to elide it.
+
 
 ### Primitive values
 
@@ -278,9 +279,6 @@ CompoundFields {
 
 It is possible to mix kdl *parameter* field declaration with *node* field 
 declaration.
-
-Note that you cannot use *argument* fields. All fields must be explicitly
-named.
 
 ```kdl
 CompoundFields third=3 {

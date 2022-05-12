@@ -11,10 +11,11 @@ version = "0.2.0"
 edition = "2021"
 
 [features]
-fancy-errors = ["miette/fancy"]
+fancy-errors = ["miette/fancy", "strsim"]
 default = ["fancy-errors"]
 
 [dependencies]
+strsim = { version = "0.10.0", optional = true }
 thiserror = "1.0"
 template-kdl = { version = "0.2.0", path = "../template-kdl"}
 bevy_reflect = "0.8.0-dev"

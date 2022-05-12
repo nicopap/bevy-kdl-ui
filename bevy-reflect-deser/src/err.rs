@@ -1,11 +1,10 @@
+use std::any::TypeId;
 use std::fmt::Write;
 
 #[cfg(feature = "fancy-errors")]
 use miette::Diagnostic;
-use thiserror::Error;
 
-use super::access;
-use template_kdl::span::Span;
+use template_kdl::span::{Span, Spanned};
 
 mod miette_compat {
     #[cfg(feature = "fancy-errors")]
@@ -33,7 +32,7 @@ mod miette_compat {
 use miette_compat::*;
 
 /// Ways for the conversion from KDL to Reflect to fail
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum ConvertError {
     #[error("This operation is unsupported: {0}")]
     GenericUnsupported(String),
@@ -44,21 +43,47 @@ pub enum ConvertError {
     TypeMismatch { expected: String, actual: String },
     #[error("Invalid integer, value {0} out of bound for rust type: {1}")]
     IntDomain(i64, &'static str),
-    #[error("Field access error: {0}")]
-    Access(#[from] access::Error),
     #[error("There is no such registered type: {0}")]
     NoSuchType(String),
     #[error("Expected a value in first entry field for type: {0}, got nothing")]
     NoValuesInNode(&'static str),
-    #[error("List cannot be declared using explicit positioning.")]
-    NamedListDeclaration,
-    #[error("Map items must be declared in the form `.field=value`.")]
-    UnnamedMapDeclaration,
+    #[error("It is not possible to statically deduce this type, this is likely caused by a mispelled field")]
+    NoStaticallyDeducedType,
+    #[error("The field {field} is declared multiple time for struct {name}")]
+    MultipleSameField { name: String, field: String },
+    #[error("{requested} is not a field of {name}")]
+    NoSuchStructField {
+        requested: String,
+        name: String,
+        available: Vec<(String, TypeId)>,
+    },
+    #[error("{name} has {actual} fields, but the declaration contains at least {requested}")]
+    TooManyTupleStructFields {
+        name: &'static str,
+        actual: u8,
+        requested: u8,
+    },
+    #[error("Declared {requested} fields for tuple of size {actual}")]
+    TooManyTupleFields { actual: u8, requested: u8 },
+    #[error("Not all fields in {name} are declared.")]
+    NotEnoughStructFields {
+        missing: Vec<u8>,
+        name: &'static str,
+        expected: Vec<String>,
+    },
+    #[error("{expected} fields were expected in this tuple, but only {actual} were declared")]
+    NotEnoughTupleFields { actual: u8, expected: u8 },
+    #[error("List cannot be declared using explicit positioning. expected `-`, got `{0}`")]
+    NamedListDeclaration(String),
+    #[error("{name} requires all its field to be named, but one of them wasn't.")]
+    UnnamedMapField { name: String },
     #[error("Field at component declaration site.")]
     BadComponentTypeName,
 }
 impl ConvertError {
+    #[cfg(feature = "fancy-errors")]
     fn help(&self) -> Option<String> {
+        use strsim::levenshtein;
         use ConvertError::*;
         let max_of = |ty: &str| -> i64 {
             match ty {
@@ -81,19 +106,49 @@ impl ConvertError {
             IntDomain(i, u_ty) if u_ty.starts_with('u') && i.is_negative() =>
                 Some(format!("Try replacing {u_ty} by i{}, or using a positive value.", u_ty.strip_prefix('u').unwrap())),
             IntDomain(..) =>Some("Either use a larger interger type or update the value to be representable with your type.".to_owned()),
-            Access(access) => access.help(),
             NoSuchType(ty) => Some(format!("Try adding it to the type registry with `reg.register::<{ty}>()`.")),
             NoValuesInNode(ty) => Some(format!("{ty} has fields, you should specify their values.")),
-            NamedListDeclaration => Some("Instead of using `.foo=bar` use `bar`.".to_owned()),
-            UnnamedMapDeclaration => Some("Add a key to the values.".to_owned()),
+            NamedListDeclaration(_) => Some("Instead of using `foo=bar` use `bar`.".to_owned()),
+            UnnamedMapField { .. } => Some("Add a key to the values.".to_owned()),
             BadComponentTypeName => Some("You are declaring a field type, but only components are expected here.".to_owned()),
 
+            NoStaticallyDeducedType => None,
+            MultipleSameField { .. } => Some("Remove one of the fields".to_owned()),
+            TooManyTupleFields { .. } => Some("Remove the extraneous one".to_owned()),
+            TooManyTupleStructFields { .. } => Some("Remove the extraneous one".to_owned()),
+            NotEnoughTupleFields {..} =>  Some("Add the missing ones".to_owned()) ,
+            NotEnoughStructFields { name, expected, missing } => {
+                let mut missing_fields = String::with_capacity(missing.len() * 12);
+                let mut first = true;
+                for missed in missing.iter().map(|i| &expected[*i as usize]) {
+                    if !first {
+                        missing_fields.push_str(", ")
+                    }
+                    missing_fields.push_str(missed);
+                    first = false;
+                }
+                Some(format!("{name} is missing the field(s) {missing_fields}"))
+            }
+            NoSuchStructField { requested, name, available } => {
+                let closest = available.iter().min_by_key(|(s,_)| levenshtein(requested, s));
+                let closest = closest.map_or("something else".to_owned(), |s| s.0.clone());
+                let mut existing = String::with_capacity(available.len() * 12);
+                let mut first = true;
+                for (ty, _) in available.iter() {
+                    if !first {
+                        existing.push_str(", ")
+                    }
+                    existing.push_str(ty);
+                    first = false;
+                }
+                Some(format!("{name}'s field are {existing}. Maybe you meant {closest}?"))
+            }
         }
     }
 }
 
 #[cfg_attr(feature = "fancy-errors", derive(Diagnostic), diagnostic())]
-#[derive(Debug, PartialEq, Error)]
+#[derive(Debug, PartialEq, thiserror::Error)]
 #[error("Failed to parse source kdl file into Reflect")]
 pub struct ConvertErrors {
     #[cfg_attr(feature = "fancy-errors", source_code)]
@@ -102,13 +157,9 @@ pub struct ConvertErrors {
     #[cfg_attr(feature = "fancy-errors", related)]
     pub(super) errors: Vec<SpannedError>,
 }
-impl From<(String, SpannedError)> for ConvertErrors {
-    fn from((source_code, error): (String, SpannedError)) -> Self {
-        Self { source_code, errors: vec![error] }
-    }
-}
 impl ConvertErrors {
-    pub(super) fn new(source_code: String, errors: Vec<SpannedError>) -> Self {
+    pub(super) fn new(source_code: String, errors: Vec<Spanned<ConvertError>>) -> Self {
+        let errors = errors.into_iter().map(SpannedError::new).collect();
         Self { source_code, errors }
     }
     pub fn show_for(&self) -> String {
@@ -135,7 +186,7 @@ impl ConvertErrors {
 }
 
 #[cfg_attr(feature = "fancy-errors", derive(Diagnostic), diagnostic())]
-#[derive(Debug, PartialEq, Error)]
+#[derive(Debug, PartialEq, thiserror::Error)]
 #[error("{error}")]
 #[non_exhaustive]
 pub(super) struct SpannedError {
@@ -148,13 +199,9 @@ pub(super) struct SpannedError {
     #[help]
     help: Option<String>,
 }
-impl From<(Span, ConvertError)> for SpannedError {
-    fn from((span, error): (Span, ConvertError)) -> Self {
-        Self::new(span, error)
-    }
-}
 impl SpannedError {
-    pub(super) fn new(span: Span, error: ConvertError) -> Self {
+    pub(super) fn new(error: Spanned<ConvertError>) -> Self {
+        let Spanned(span, error) = error;
         Self {
             span: span.pair().into(),
             #[cfg(feature = "fancy-errors")]

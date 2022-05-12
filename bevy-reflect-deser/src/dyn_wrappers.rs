@@ -1,314 +1,378 @@
-//! Wrappers around the Dynamic* of bevy_reflect to enable
-//! arbitrary setting of fields.
-//!
-//! Since generally when defined in the KDL file, the order of field
-//! declaration can vary from that of the rust declaration, it is
-//! necessary to re-order the fields before pushing them into the
-//! `Dynamic*` so that it is fully compatible with the corresponding
-//! data type.
-//!
-//! (here, "rw" stands for "Random Write")
-//!
-//! We define 2 traits:
-//! * [`RwStruct`]: A struct with fields writeable in arbitrary order.
-//! * [`SeqStruct`]: A struct with fields writeable only sequentially.
-//!
-//! We want to exclusively use a [`RwStruct`] API, but the objects we
-//! are dealing with only provide a [`SeqStruct`] API.
-//!
-//! We can write to fields in two mode:
-//! * `Anonymous`: Values are declared without field names, the field
-//!   they correspond to is implicit in the order of the values.
-//! * `By field`: Values are associated with a specific field, that may
-//!   be out of order from the declaration sequence.
-//!
-//! Anonymous write mode is _always_ sequential. By wrapping a `Dynamic*`
-//! into a struct that prevents arbitrary access, we can guarentee that
-//! the writes are always in the right order. This is what [`Anon`] does.
-//!
-//! By-field writes are super hairy. Since bevy_reflect doesn't define
-//! an arbitrary access API for the `Dynamic*` structs, we are stuck
-//! creating a buffer, reordering it and writting one after the other
-//! the value to the `Dynamic*` thing. This is was [`Rw`] does.
-//!
-//! Both [`Anon`] and [`Rw`] wrap [`SeqStruct`] to provide a [`RwStruct`]
-//! API.
-//!
-//! We also take advantage of a clear API definition to provide meaningfull
-//! errors when accessing and adding fields to `Dynamic*` stuff.
-use std::fmt;
 use std::marker::PhantomData;
 
-use super::access::{self, Position};
-use super::DynRefl;
 use bevy_reflect::{
-    DynamicList, DynamicMap, DynamicStruct, DynamicTuple, DynamicTupleStruct, NamedField,
-    TypeIdentity, UnnamedField,
+    DynamicList, DynamicMap, DynamicStruct, DynamicTuple, DynamicTupleStruct, ListInfo, Map,
+    MapInfo, NamedField, Reflect, Struct, StructInfo, Tuple, TupleInfo, TupleStruct,
+    TupleStructInfo, TypeIdentity, TypeInfo, TypeRegistration, TypeRegistry, ValueInfo,
+};
+use template_kdl::{
+    multi_err::{MultiError, MultiErrorTrait, MultiResult},
+    multi_try,
+    span::Spanned,
 };
 
-/// Wraps a Dynamic* to set the fields in arbitrary order while
-/// preserving the final order.
-///
-/// "Rw" stands for "Random Write".
-pub(super) struct Rw<'r, T, F: ?Sized, M> {
-    buffer: Vec<(Position, Box<F>, DynRefl)>,
-    map: &'r [M],
-    name: String,
-    _ty: PhantomData<T>,
-}
-impl<'r, T, F: ?Sized, M> Rw<'r, T, F, M>
-where
-    T: SeqStruct<Field = F, Map = [M]>,
-{
-    pub(super) fn new(name: String, map: &'r [M]) -> Self {
-        let _ty = PhantomData;
-        let buffer = Vec::new();
-        Rw { buffer, name, map, _ty }
+use crate::err::{ConvResult, ConvertError};
+use crate::visit::{FieldThunk, KdlConcrete, NodeThunkExt};
+use crate::DynRefl;
+
+pub(crate) type MultiSpan<T> = MultiResult<T, Spanned<ConvertError>>;
+pub(crate) trait Infos {
+    type DynamicWrapper: Builder<Info = Self>;
+    fn name(&self) -> &'static str;
+    fn new_dynamic(&self, node: NodeThunkExt, reg: &TypeRegistry) -> MultiSpan<DynRefl> {
+        Self::DynamicWrapper::new_dynamic(self, node, reg)
     }
 }
-impl<'r, T, F: ?Sized + fmt::Debug, M> RwStruct for Rw<'r, T, F, M>
-where
-    T: SeqStruct<Field = F, Map = [M]>,
-{
-    type Out = T;
-    type Field = Box<F>;
-    fn add_field<T2R>(&mut self, field: Box<F>, make_value: T2R) -> Result<(), access::Error>
-    where
-        T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>,
-    {
-        let oob = || access::Error::OutOfBound(format!("{field:?}"));
-        let (pos, ty_id) = T::map(self.map, &field).ok_or_else(oob)?;
-        if self.buffer.iter().any(|(p, _, _)| p == &pos) {
-            return Err(access::Error::AlreadyExists(pos.to_string()));
-        }
-        if let Some(value) = make_value(ty_id) {
-            self.buffer.push((pos, field, value));
-        }
-        Ok(())
-    }
-    fn complete(self) -> Result<T, access::Error> {
-        if self.buffer.len() == self.map.len() {
-            let Self { name, mut buffer, .. } = self;
-            let mut ret = T::default();
-            ret.set_name(name);
-            buffer.sort_unstable_by_key(|p| p.0);
-            for (_, field, value) in buffer.into_iter() {
-                ret.add(&field, value);
+macro_rules! impl_infos {
+    ($ty_name:ty, $field:ty, $dynamic:ty) => {
+        impl Infos for $ty_name {
+            type DynamicWrapper = Wrapper<$field, $ty_name, $dynamic>;
+            fn name(&self) -> &'static str {
+                self.id().type_name()
             }
-            Ok(ret)
-        } else {
-            Err(access::Error::FieldCountMismatch {
-                expected: self.map.len(),
-                actual: self.buffer.len(),
-            })
         }
+    };
+}
+impl_infos! {MapInfo, String, DynamicMap}
+impl_infos! {StructInfo, String, DynamicStruct}
+impl_infos! {ListInfo, (), DynamicList}
+impl_infos! {TupleInfo, (), DynamicTuple}
+impl_infos! {TupleStructInfo, (), DynamicTupleStruct}
+impl Infos for ValueInfo {
+    type DynamicWrapper = ValueBuilder;
+    fn name(&self) -> &'static str {
+        self.id().type_name()
     }
 }
-
-/// A wrapper to force sequential anonymous access to Dynamic*.
-pub(super) struct Anon<'r, T, F: ?Sized, M> {
-    inner: T,
-    _f: PhantomData<F>,
-    map: &'r [M],
-    current: u8,
+pub(crate) fn get_named<'r>(name: &str, reg: &'r TypeRegistry) -> ConvResult<&'r TypeRegistration> {
+    reg.get_with_name(name)
+        .or_else(|| reg.get_with_short_name(name))
+        .ok_or(ConvertError::NoSuchType(name.to_owned()))
 }
-impl<'r, T, F: ?Sized, M> Anon<'r, T, F, M>
-where
-    T: SeqStruct<Field = F, Map = [M]>,
-{
-    pub(super) fn new(name: String, map: &'r [M]) -> Self {
-        let mut inner = T::default();
-        inner.set_name(name);
-        let _f = PhantomData;
-        Self { inner, map, current: 0, _f }
-    }
-}
-impl<'r, T, F: ?Sized, M> RwStruct for Anon<'r, T, F, M>
-where
-    T: SeqStruct<Field = F, Map = [M]>,
-{
-    type Field = ();
-    type Out = T;
-
-    /// Add directly a new anonymous field to the wrapped `DynamicFoo`
-    ///
-    /// Note that if `make_value` fails, the value is not added but counted
-    /// "as if" it was, when doing the final field count check in [`Self::complete`].
-    ///
-    /// It is the responsibility of the user that if `make_value` returns a None, a
-    /// corresponding error is registered in the calling code.
-    fn add_field<T2R>(&mut self, (): Self::Field, make_value: T2R) -> Result<(), access::Error>
-    where
-        T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>,
-    {
-        let idx = Position::new_u8(self.current);
-        let oob = || access::Error::OutOfBound(format!("field .{idx}"));
-        let (field, ty_id) = T::unmap(self.map, idx).ok_or_else(oob)?;
-        self.current += 1;
-        if let Some(value) = make_value(ty_id) {
-            self.inner.add(&field, value);
-        };
-        Ok(())
-    }
-    fn complete(self) -> Result<Self::Out, access::Error> {
-        if self.current as usize == self.map.len() {
-            Ok(self.inner)
-        } else {
-            Err(access::Error::FieldCountMismatch {
-                expected: self.map.len(),
-                actual: self.current as usize,
-            })
+// Possible failure states:
+// * declared is not registered
+// * expected is not registered
+// * declared is Some and does not match expected
+// * Any combination of the above
+// * Fatal: only if expected is not registered and (either declared is None or not registered)
+// TODO: multiple possible expected types (with preferences)
+fn type_info<'r>(
+    reg: &'r TypeRegistry,
+    declared: Option<&str>,
+    expected: Option<&TypeIdentity>,
+) -> MultiResult<&'r TypeInfo, ConvertError> {
+    let mut errors = MultiError::default();
+    let declared = declared.and_then(|name| errors.optionally(get_named(name, reg)));
+    let expected_not_reg = || match expected {
+        Some(expected) => ConvertError::NoSuchType(expected.type_name().to_owned()),
+        None => ConvertError::NoStaticallyDeducedType,
+    };
+    let expected = expected.and_then(|e| reg.get(e.type_id()));
+    match (declared, expected) {
+        // Both declared and expected are registered, but they are not equal
+        // We chose `declared` since that's what is in the file, so we expect that
+        // the rest of the file uses the declaredly stated type.
+        (Some(declared), Some(expected)) if declared.type_id() != expected.type_id() => {
+            let expected = expected.name().to_owned();
+            let actual = declared.name().to_owned();
+            errors.add_error(ConvertError::TypeMismatch { expected, actual });
+            errors.into_result(declared.type_info())
+        }
+        // Either declared was not provided, or it was not registered (in which case
+        // the error is already in `errors`) or it was provided, registered and matched
+        // expected. And expected is registered
+        (Some(_) | None, Some(expected)) => errors.into_result(expected.type_info()),
+        // Either declared was not provided, or it was not registered (in which case
+        // the error is already in `errors`) and expected is not registered
+        // NOTE: This is the only Fatal error preventing any validation of what's inside.
+        (None, None) => errors.into_errors(expected_not_reg()),
+        // declared type exists, but is not equal to expected one, and the
+        // expected one is not registered. This is an error, but we continue,
+        // hoping to be useful
+        (Some(declared), None) => {
+            errors.add_error(expected_not_reg());
+            errors.into_result(declared.type_info())
         }
     }
 }
 
 type Tid = TypeIdentity;
-
-/// A thing that can be built in arbitrary order
-pub(super) trait RwStruct {
+pub(crate) trait Primitive: Reflect {
     type Field;
-    type Out;
-    fn add_field<T2R>(&mut self, field: Self::Field, make_value: T2R) -> Result<(), access::Error>
-    where
-        T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>;
-    fn complete(self) -> Result<Self::Out, access::Error>;
+    type Info: Infos;
+    fn set_name(&mut self, name: String);
+    fn add_boxed(&mut self, field: Self::Field, boxed: DynRefl) -> ConvResult<()>;
+    fn expected<'i>(&self, at_field: &Self::Field, info: &'i Self::Info) -> ConvResult<&'i Tid>;
+    fn validate(&self, info: &Self::Info) -> ConvResult<()>;
 }
-/// A DynamicList with guarenteed type (mostly to be able to impl RwStruct on it).
-///
-/// Trying to add something of the wrong type to it will result in an error.
-pub(super) struct HomoList {
-    list: DynamicList,
-    ty: TypeIdentity,
-}
-impl HomoList {
-    // TODO(CLEAN): accept ListInfo as input, so that can do the
-    // fancy things in there
-    pub(super) fn new(name: String, ty: TypeIdentity) -> Self {
-        let mut list = DynamicList::default();
-        list.set_name(name);
-        Self { list, ty }
+
+impl Primitive for DynamicMap {
+    type Field = String;
+    type Info = MapInfo;
+    fn add_boxed(&mut self, field: String, boxed: DynRefl) -> ConvResult<()> {
+        if self.get(&field).is_some() {
+            return Err(ConvertError::MultipleSameField { name: self.name().to_owned(), field });
+        }
+        let box_field = Box::new(field.clone());
+        self.insert_boxed(box_field, boxed);
+        Ok(())
+    }
+    fn expected<'i>(&self, _: &String, info: &'i MapInfo) -> ConvResult<&'i Tid> {
+        Ok(info.value())
+    }
+    fn set_name(&mut self, name: String) {
+        self.set_name(name);
+    }
+    fn validate(&self, _: &Self::Info) -> ConvResult<()> {
+        Ok(())
     }
 }
-impl RwStruct for HomoList {
+impl Primitive for DynamicStruct {
+    type Field = String;
+    type Info = StructInfo;
+    fn add_boxed(&mut self, field: String, boxed: DynRefl) -> ConvResult<()> {
+        if self.field(&field).is_some() {
+            return Err(ConvertError::MultipleSameField { name: self.name().to_owned(), field });
+        }
+        self.insert_boxed(&field, boxed);
+        Ok(())
+    }
+    fn expected<'i>(&self, field: &String, info: &'i Self::Info) -> ConvResult<&'i Tid> {
+        let name_type =
+            |field: &NamedField| (field.name().clone().into_owned(), field.id().type_id());
+        let err = || ConvertError::NoSuchStructField {
+            name: info.name().to_owned(),
+            available: info.iter().map(name_type).collect(),
+            requested: field.clone(),
+        };
+        info.field(&*field).ok_or_else(err).map(|f| f.id())
+    }
+    fn set_name(&mut self, name: String) {
+        self.set_name(name);
+    }
+    fn validate(&self, info: &Self::Info) -> ConvResult<()> {
+        let actual = self.field_len() as u8;
+        let expected = info.field_len() as u8;
+        if actual != expected {
+            let name = info.name();
+            // TODO(reporting): find name of missing fields and add them to error
+            let expected: Vec<_> = info.iter().map(|t| t.name().clone().into_owned()).collect();
+            let is_missing = |n| self.field(n).is_none();
+            let missing = expected
+                .iter()
+                .enumerate()
+                .filter_map(|(i, n)| is_missing(n).then(|| i as u8))
+                .collect();
+            Err(ConvertError::NotEnoughStructFields { name, missing, expected })
+        } else {
+            Ok(())
+        }
+    }
+}
+impl Primitive for DynamicList {
     type Field = ();
-    type Out = DynamicList;
-    fn add_field<T2R>(&mut self, _field: Self::Field, make_value: T2R) -> Result<(), access::Error>
-    where
-        T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>,
-    {
-        if let Some(value) = make_value(&self.ty) {
-            self.list.push_box(value);
-            Ok(())
+    type Info = ListInfo;
+    fn add_boxed(&mut self, _: (), boxed: DynRefl) -> ConvResult<()> {
+        self.push_box(boxed);
+        Ok(())
+    }
+    fn expected<'i>(&self, _: &(), info: &'i Self::Info) -> ConvResult<&'i Tid> {
+        Ok(info.item())
+    }
+    fn set_name(&mut self, name: String) {
+        self.set_name(name);
+    }
+    fn validate(&self, _: &Self::Info) -> ConvResult<()> {
+        Ok(())
+    }
+}
+impl Primitive for DynamicTuple {
+    type Field = ();
+    type Info = TupleInfo;
+    fn add_boxed(&mut self, _: (), boxed: DynRefl) -> ConvResult<()> {
+        self.insert_boxed(boxed);
+        Ok(())
+    }
+    fn expected<'i>(&self, _: &(), info: &'i Self::Info) -> ConvResult<&'i Tid> {
+        let requested = self.field_len();
+        let err = || ConvertError::TooManyTupleFields {
+            actual: info.field_len() as u8,
+            requested: requested as u8,
+        };
+        info.field_at(requested).ok_or_else(err).map(|f| f.id())
+    }
+    fn set_name(&mut self, name: String) {
+        self.set_name(name);
+    }
+    fn validate(&self, info: &Self::Info) -> ConvResult<()> {
+        // The only possible error here is that there are not enough fields, since we
+        // already check for too many, and we assume the correct types are provided.
+        let actual = self.field_len() as u8;
+        let expected = info.field_len() as u8;
+        if actual != expected {
+            Err(ConvertError::NotEnoughTupleFields { actual, expected })
         } else {
-            Err(access::Error::NonHomoType)
+            Ok(())
         }
     }
-    fn complete(self) -> Result<Self::Out, access::Error> {
-        Ok(self.list)
+}
+impl Primitive for DynamicTupleStruct {
+    type Field = ();
+    type Info = TupleStructInfo;
+    fn add_boxed(&mut self, _: (), boxed: DynRefl) -> ConvResult<()> {
+        self.insert_boxed(boxed);
+        Ok(())
     }
-}
-/// A DynamicMap with forced string keys and homogenous values.
-///
-/// This is mostly in order to fit a round peg in a square hole: I have this `RwStruct` and I'd
-/// rather write a mountain of code for each `DynamicFoo` that exists, so I proxy everything through
-/// `RwStruct` and do not bother to increase the API surface. The code is already massive for what
-/// little it does.
-pub(super) struct HomoMap {
-    map: DynamicMap,
-    ty: TypeIdentity,
-}
-impl HomoMap {
-    // TODO(CLEAN): accept MapInfo as input, so that can do the
-    // fancy things in there, less error-prone
-    pub(super) fn new(name: String, ty: TypeIdentity) -> Self {
-        let mut map = DynamicMap::default();
-        map.set_name(name);
-        Self { map, ty }
+    fn expected<'i>(&self, _: &(), info: &'i Self::Info) -> ConvResult<&'i Tid> {
+        let requested = self.field_len();
+        let err = || ConvertError::TooManyTupleStructFields {
+            name: info.name(),
+            actual: info.field_len() as u8,
+            requested: requested as u8,
+        };
+        info.field_at(requested).ok_or_else(err).map(|f| f.id())
     }
-}
-impl RwStruct for HomoMap {
-    type Field = Box<str>;
-    type Out = DynamicMap;
-    fn add_field<T2R>(&mut self, field: Self::Field, make_value: T2R) -> Result<(), access::Error>
-    where
-        T2R: FnOnce(&TypeIdentity) -> Option<DynRefl>,
-    {
-        if let Some(value) = make_value(&self.ty) {
-            let string_field = field.into_string();
-            self.map.insert_boxed(Box::new(string_field), value);
-            Ok(())
+    fn set_name(&mut self, name: String) {
+        self.set_name(name);
+    }
+    fn validate(&self, info: &Self::Info) -> ConvResult<()> {
+        // The only possible error here is that there are not enough fields, since we
+        // already check for too many, and we assume the correct types are provided.
+        let actual = self.field_len() as u8;
+        let expected = info.field_len() as u8;
+        if actual != expected {
+            // TODO(reporting): Have a variant where the type name is stored
+            Err(ConvertError::NotEnoughTupleFields { actual, expected })
         } else {
-            Err(access::Error::NonHomoType)
+            Ok(())
         }
-    }
-    fn complete(self) -> Result<Self::Out, access::Error> {
-        Ok(self.map)
     }
 }
 
-/// A thing that can only be built sequentially.
-pub(super) trait SeqStruct: Default {
-    type Field: ?Sized;
-    type Map: ?Sized;
-    fn add(&mut self, field: &Self::Field, value: DynRefl);
-    fn set_name(&mut self, name: String);
-    fn map<'a>(mapping: &'a Self::Map, field: &Self::Field)
-        -> Option<(Position, &'a TypeIdentity)>;
-    fn unmap(mapping: &Self::Map, pos: Position) -> Option<(Box<Self::Field>, &TypeIdentity)>;
-}
-impl SeqStruct for DynamicStruct {
-    type Field = str;
-    type Map = [NamedField];
-    fn add(&mut self, field: &Self::Field, value: DynRefl) {
-        self.insert_boxed(field, value);
-    }
-    fn map<'a>(mapping: &'a Self::Map, field: &Self::Field) -> Option<(Position, &'a Tid)> {
-        let mut enumerated = mapping.iter().enumerate();
-        let (pos, id) = enumerated.find_map(|(i, f)| (f.name() == field).then(|| (i, f.id())))?;
-        Some((Position::new(pos), id))
-    }
-    fn unmap(mapping: &Self::Map, pos: Position) -> Option<(Box<Self::Field>, &Tid)> {
-        mapping
-            .get(pos.value())
-            .map(|f| (f.name().clone().into(), f.id()))
-    }
-    fn set_name(&mut self, name: String) {
-        self.set_name(name)
+pub(crate) trait Builder: Sized {
+    type Info: Infos;
+    fn new(expected: &Self::Info) -> Self;
+    fn add_field(&mut self, field: FieldThunk, reg: &TypeRegistry) -> MultiSpan<()>;
+    fn complete(self) -> MultiResult<DynRefl, ConvertError>;
+    fn new_dynamic(
+        expected: &Self::Info,
+        node: NodeThunkExt,
+        reg: &TypeRegistry,
+    ) -> MultiSpan<DynRefl> {
+        let mut errors = MultiError::default();
+        let mut builder = Self::new(expected);
+        for field in node.fields() {
+            let _ = errors.optionally(builder.add_field(field, reg));
+        }
+        builder.complete().map_err_span(node.span()).combine(errors)
     }
 }
-impl SeqStruct for DynamicTuple {
-    type Field = Position;
-    type Map = [UnnamedField];
-    fn add(&mut self, _field: &Self::Field, value: DynRefl) {
-        self.insert_boxed(value);
+pub(crate) struct ValueBuilder;
+impl Builder for ValueBuilder {
+    type Info = ValueInfo;
+    fn new(_: &Self::Info) -> Self {
+        unreachable!("This should never be called")
     }
-    fn unmap(mapping: &Self::Map, pos: Position) -> Option<(Box<Self::Field>, &Tid)> {
-        mapping
-            .get(pos.value())
-            .map(move |f| (Box::new(pos), f.id()))
+    fn add_field(&mut self, _: FieldThunk, _: &TypeRegistry) -> MultiSpan<()> {
+        unreachable!("This should never be called")
     }
-    fn map<'a>(mapping: &'a Self::Map, field: &Self::Field) -> Option<(Position, &'a Tid)> {
-        let ty_info = mapping.get(field.value())?;
-        Some((*field, ty_info.id()))
+    fn complete(self) -> MultiResult<DynRefl, ConvertError> {
+        unreachable!("This should never be called")
     }
-    fn set_name(&mut self, _name: String) {
-        // Intentionally does nothing (tuples are anonymous)
+    fn new_dynamic(
+        expected: &Self::Info,
+        node: NodeThunkExt,
+        reg: &TypeRegistry,
+    ) -> MultiSpan<DynRefl> {
+        if let Some(first_field) = node.first_argument() {
+            first_field
+                .map_err(|v| KdlConcrete::from(v.clone()).dyn_value(expected.id(), reg))
+                .into()
+        } else {
+            let span = node.span();
+            let err = ConvertError::NoValuesInNode(expected.name());
+            MultiResult::Err(vec![Spanned(span, err)])
+        }
     }
 }
-impl SeqStruct for DynamicTupleStruct {
-    type Field = Position;
-    type Map = [UnnamedField];
-    fn add(&mut self, _field: &Self::Field, value: DynRefl) {
-        self.insert_boxed(value);
+
+pub(crate) struct Wrapper<F, I, T> {
+    acc: T,
+    info: I,
+    // This exists so that it's possible to implement
+    // Builder separately for wrappers wrapping Field=()
+    // and Field=String. Not sure why, but it is
+    _f: PhantomData<F>,
+}
+impl<T> Builder for Wrapper<(), T::Info, T>
+where
+    T: Primitive<Field = ()> + Default,
+    T::Info: Clone,
+{
+    type Info = T::Info;
+    fn new(expected: &Self::Info) -> Self {
+        let mut acc = T::default();
+        acc.set_name(expected.name().to_owned());
+        Self { acc, info: expected.clone(), _f: PhantomData }
     }
-    fn unmap(mapping: &Self::Map, pos: Position) -> Option<(Box<Self::Field>, &Tid)> {
-        mapping.get(pos.value()).map(|f| (Box::new(pos), f.id()))
+    fn add_field(&mut self, field: FieldThunk, reg: &TypeRegistry) -> MultiSpan<()> {
+        let mut errors = MultiError::default();
+        let opt_ty = field.ty.or(field.name);
+        // In case we have a name or declared type, we use their span for the type
+        // error. Otherwise, we use the whole thunk's span.
+        let ty_span = opt_ty.map_or_else(|| field.span(), |t| t.0);
+        let expected = self.acc.expected(&(), &self.info);
+        let expected = errors.optionally(expected.map_err(|e| Spanned(ty_span, e)));
+        let try_ty = type_info(reg, opt_ty.map(|t| t.1), expected).map_err_span(ty_span);
+        let ty = multi_try!(errors, try_ty);
+        let value = multi_try!(errors, field.value.into_dyn(ty, reg));
+        if let Err(err) = self.acc.add_boxed((), value) {
+            errors.add_error(Spanned(ty_span, err));
+        }
+        errors.into_result(())
     }
-    fn map<'a>(mapping: &'a Self::Map, field: &Self::Field) -> Option<(Position, &'a Tid)> {
-        let ty_info = mapping.get(field.value())?;
-        Some((*field, ty_info.id()))
+    fn complete(self) -> MultiResult<DynRefl, ConvertError> {
+        let mut errors = MultiError::default();
+        let _ = errors.optionally(self.acc.validate(&self.info));
+        let ret: DynRefl = Box::new(self.acc);
+        errors.into_result(ret)
     }
-    fn set_name(&mut self, name: String) {
-        self.set_name(name)
+}
+impl<T> Builder for Wrapper<String, T::Info, T>
+where
+    T: Primitive<Field = String> + Default,
+    T::Info: Clone,
+{
+    type Info = T::Info;
+    fn new(expected: &T::Info) -> Self {
+        let mut acc = T::default();
+        acc.set_name(expected.name().to_owned());
+        Self { acc, info: expected.clone(), _f: PhantomData }
+    }
+    fn add_field(&mut self, field: FieldThunk, reg: &TypeRegistry) -> MultiSpan<()> {
+        let mut errors = MultiError::default();
+        if let Some(name) = field.name {
+            let expect = |n: &str| self.acc.expected(&n.to_owned(), &self.info);
+            let expected = name.map_err(expect);
+            let expected = errors.optionally(expected);
+            let opt_ty = field.ty;
+            // In case we have a declared type, we use their span for the type
+            // error. Otherwise, we use the name (which incidentally is required)
+            let ty_span = opt_ty.map_or(name.0, |t| t.0);
+            let try_ty = type_info(reg, opt_ty.map(|t| t.1), expected).map_err_span(ty_span);
+            let ty = multi_try!(errors, try_ty);
+            let value = multi_try!(errors, field.value.into_dyn(ty, reg));
+            self.acc.add_boxed(name.1.to_owned(), value);
+        } else {
+            let err = ConvertError::UnnamedMapField { name: self.acc.type_name().to_owned() };
+            errors.add_error(Spanned(field.span(), err));
+        }
+        errors.into_result(())
+    }
+    fn complete(self) -> MultiResult<DynRefl, ConvertError> {
+        let mut errors = MultiError::default();
+        let _ = errors.optionally(self.acc.validate(&self.info));
+        let ret: DynRefl = Box::new(self.acc);
+        errors.into_result(ret)
     }
 }

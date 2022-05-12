@@ -4,7 +4,6 @@
 //! that it's possible to report more than a single error to the user.
 use bevy_reflect::Reflect;
 
-mod access;
 mod dyn_wrappers;
 mod err;
 mod visit;
@@ -112,13 +111,9 @@ mod test {
     #[test]
     fn test_component() {
         // for struct-type components
-        let kdl_foo = r#"Foo .bar=1034 .baz="hello" .xo="B";"#;
+        let kdl_foo = r#"Foo bar=1034 baz="hello" xo="B";"#;
         let expected_foo = Foo { bar: 1034, baz: "hello".to_owned(), xo: B };
         assert_eq!(parse_kdl::<Foo>(kdl_foo), Ok(expected_foo.clone()));
-
-        // Anonymous access (with marker components)
-        let kdl_foo = r#"Foo "B" 1034 "hello";"#;
-        assert_eq!(parse_kdl::<Foo>(kdl_foo), Ok(expected_foo));
 
         // For tuple-type components
         let kdl_bar = r#"Bar 3.0;"#;
@@ -131,38 +126,31 @@ mod test {
         // TODO: Enum variants n' stuff
         // assert_eq!(parse_kdl::<E>("E \"Y\""), Ok(E::Y));
 
-        assert_eq!(parse_kdl::<D>("D .x=10;"), Ok(D { x: 10 }));
-        assert_eq!(parse_kdl::<D>("D 10;"), Ok(D { x: 10 }));
+        assert_eq!(parse_kdl::<D>("D x=10;"), Ok(D { x: 10 }));
 
         assert_eq!(parse_kdl::<C>("C 22.0;"), Ok(C(22.0)));
-        assert_eq!(parse_kdl::<C>("C .0=22.0;"), Ok(C(22.0)));
 
         assert_eq!(parse_kdl::<B>("B"), Ok(B));
 
         assert_eq!(
             // explicit declaration
-            parse_kdl::<A>("A .x=3030 { .d .x=140; .c 444.0;}"),
+            parse_kdl::<A>("A x=3030 { d x=140; c 444.0;}"),
             Ok(A { x: 3030, d: D { x: 140 }, c: C(444.0) })
         );
         assert_eq!(
-            // Anonymous declaration
-            parse_kdl::<A>("A 4144 { D .x=441; C 414.0;}"),
-            Ok(A { x: 4144, d: D { x: 441 }, c: C(414.0) })
-        );
-        assert_eq!(
             // Arbitrary order
-            parse_kdl::<A>("A .x=5151 { .c 515.0; .d 155; }"),
+            parse_kdl::<A>("A x=5151 { c 515.0; d x=155; }"),
             Ok(A { x: 5151, d: D { x: 155 }, c: C(515.0) })
         );
         assert_eq!(
             // value type casting
-            parse_kdl::<A>("A .x=6161 .c=616.0 .d=16;"),
+            parse_kdl::<A>("A x=6161 c=616.0 d=16;"),
             Ok(A { x: 6161, d: D { x: 16 }, c: C(616.0) })
         );
         let f = r#"
         F {
-            .d -34234552 3943.13456 "I am a foo" 65431.25543243 0b101010101010101010101010;
-            .b 255;
+           d -34234552 3943.13456 "I am a foo" 65431.25543243 0b101010101010101010101010;
+           b 255;
         }"#;
         let f_v = F {
             d: (-34234552, 3943.13456, "I am a foo".to_owned(), 65431.25543243, 0b101010101010101010101010),
@@ -171,8 +159,8 @@ mod test {
         assert_eq!(parse_kdl::<F>(f), Ok(f_v));
         let g = r#"
         G {
-            .y "hello" "this" "is" "a" "series" "of" "worlds";
-            .z .pi=3.14 .e=2.7182818 .tau=6.28 .ln2=0.69314; 
+            y "hello" "this" "is" "a" "series" "of" "worlds";
+            z pi=3.14 e=2.7182818 tau=6.28 ln2=0.69314; 
         } 
         "#;
         let g_v = G {
@@ -181,48 +169,42 @@ mod test {
         };
         assert_eq!(parse_kdl::<G>(g), Ok(g_v));
     }
-    #[test]
-    fn parse_errors() {
-        use access::Error::NonHomoType;
-        use access::Mode::{Anon, Named, Pos};
-        let field =
-            |expected, actual| ConvertError::Access(access::Error::WrongMode { expected, actual });
-        let ty_err = |exp: &str, act: &str| ConvertError::TypeMismatch {
-            expected: exp.to_string(),
-            actual: act.to_string(),
-        };
-        // Swap two anonymous declarations
-        let doc = "A 1111 {  C 111.0; D 11;}";
-        let err = parse_kdl::<A>(doc).unwrap_err();
-        let mut err: Vec<_> = err.errors().map(|e| (&doc[e.range()], &e.error)).collect();
-        err.sort_by_key(|t| t.0);
-        assert_eq!(err[0], ("C", &ty_err("D", "C")));
-        assert_eq!(err[1], ("D", &ty_err("C", "D")));
-        assert_eq!(err.len(), 2);
+    // TODO: rewrite error tests
+    // #[test]
+    // fn parse_errors() {
+    //     let ty_err = |exp: &str, act: &str| ConvertError::TypeMismatch {
+    //         expected: exp.to_string(),
+    //         actual: act.to_string(),
+    //     };
+    //     // Swap two anonymous declarations
+    //     let doc = "A 1111 {  C 111.0; D 11;}";
+    //     let err = parse_kdl::<A>(doc).unwrap_err();
+    //     let mut err: Vec<_> = err.errors().map(|e| (&doc[e.range()], &e.error)).collect();
+    //     err.sort_by_key(|t| t.0);
+    //     assert_eq!(err[0], ("C", &ty_err("D", "C")));
+    //     assert_eq!(err[1], ("D", &ty_err("C", "D")));
+    //     assert_eq!(err.len(), 2);
 
-        // Wrong type on newtype with field access
-        let doc = "A .x=2121 .d=220.0 .c=22;";
-        let err = parse_kdl::<A>(doc).unwrap_err();
-        let mut err: Vec<_> = err.errors().map(|e| (&doc[e.range()], &e.error)).collect();
-        err.sort_by_key(|t| t.0);
-        assert!(matches!(err[0], ("22", ConvertError::TypeMismatch { .. })));
+    //     // Wrong type on newtype with field access
+    //     let doc = "A x=2121 d=220.0 c=22;";
+    //     let err = parse_kdl::<A>(doc).unwrap_err();
+    //     let mut err: Vec<_> = err.errors().map(|e| (&doc[e.range()], &e.error)).collect();
+    //     err.sort_by_key(|t| t.0);
+    //     assert!(matches!(err[0], ("22", ConvertError::TypeMismatch { .. })));
 
-        // wrong type in homogenous list and maps
-        let doc = r#"
-        G { .y "hello" "this" 12 "a" "series" "of" "worlds";
-            .z .pi=3.14 .e=2.7182818 .large=999999 .tau=6.28 ln2=0.69314;  }"#;
-        let err = parse_kdl::<G>(doc).unwrap_err();
-        let mut err: Vec<_> = err.errors().collect();
-        err.sort_by_key(|t| t.offset());
-        let err: Vec<_> = err
-            .into_iter()
-            .map(|e| (&doc[e.range()], &e.error))
-            .collect();
-        assert_eq!(err[0], ("12", &ty_err("alloc::string::String", "int(12)")));
-        assert_eq!(err[1], ("12", &ConvertError::Access(NonHomoType)));
-        assert_eq!(err[2], ("999999", &ty_err("f32", "int(999999)")));
-        assert_eq!(err[3], ("999999", &ConvertError::Access(NonHomoType)));
-        assert_eq!(err[4], ("ln2=", &field(Named, access::Field::Implicit)));
-        assert_eq!(err.len(), 5);
-    }
+    //     // wrong type in homogenous list and maps
+    //     let doc = r#"
+    //     G { y "hello" "this" 12 "a" "series" "of" "worlds";
+    //         z pi=3.14 e=2.7182818 large=999999 tau=6.28 ln2=0.69314;  }"#;
+    //     let err = parse_kdl::<G>(doc).unwrap_err();
+    //     let mut err: Vec<_> = err.errors().collect();
+    //     err.sort_by_key(|t| t.offset());
+    //     let err: Vec<_> = err
+    //         .into_iter()
+    //         .map(|e| (&doc[e.range()], &e.error))
+    //         .collect();
+    //     assert_eq!(err[0], ("12", &ty_err("alloc::string::String", "int(12)")));
+    //     assert_eq!(err[2], ("999999", &ty_err("f32", "int(999999)")));
+    //     assert_eq!(err.len(), 5);
+    // }
 }

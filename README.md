@@ -37,11 +37,11 @@ See the relevant sections in the respective crate READMEs.
   Also makes error reporting and type checking easier.
 - [X] handle top level value types
 - [X] Allow newtypes to be declared in "KdlValue" if it is wrapping something
-  that can
+      that can
 - [X] Add Vec & HashMap handling
 - [X] Extend kdl-type match checking to everything
 - [X] Consider non-consuming parsing (after all, the only values we really copy are the
-  primitive types & strings, and we are already cloning them a bunch)
+      primitive types & strings, and we are already cloning them a bunch)
 - [X] proper span-based error reporting
 - [X] Spanned smart pointer that forces updating offset when accessing a Kdl type
 - [ ] Refactor
@@ -51,14 +51,16 @@ See the relevant sections in the respective crate READMEs.
   - [X] Formalize and document difference between `Context` and `Bindings`
   - [X] Rename `Bindings`
   - [ ] Remove dependency on pointers, own shit so that it might be possible
-    to use multiple files
+        to use multiple files
 - [X] Resolve the "variable scopping" problem.
 - [X] Document `fns` (mostly copy the section on top here)
+- [ ] Deduplicate similar errors
 - [ ] Add context to field errors (encompassing struct, alternative possible names etc.)
 - [ ] FIX error message for too many fields in tupleStruct
-- [ ] FIX that we accept .N="foo" where N is out of bound for tupleStruct
-- [ ] FIX that we accept field reference mixup in tupleStruct
-- [ ] FIX TupleStruct .N= not doing anything
+- [X] FIX that we accept .N="foo" where N is out of bound for tupleStruct
+      (actually removed the feature)
+- [X] FIX that we accept field reference mixup in tupleStruct
+- [X] FIX TupleStruct .N= not doing anything (actually removed the feature)
 - [X] Load more than one node
 - [X] detect and parse `fn` nodes
 - [X] Expand `fn` nodes in the last node of file
@@ -66,18 +68,18 @@ See the relevant sections in the respective crate READMEs.
 - [ ] Actually use invocation arguments in `fn` expension
 - [ ] `expand` meta-node
 - [ ] add a `bundle` node so that it's possible to define multiple
-  components at a time
-- [ ] Formalize and list the bevy-reflect-deser format.
+      components at a time
+- [X] Formalize and list the bevy-reflect-deser format.
 - [ ] Add the README example in bevy-reflect-deser to rustdoc.
 - [ ] rename `dyn_wrappers` in bevy-reflect-deser
 - [ ] ?? Make bevy-reflect-deser independent from tempalte-kdl
-- [ ] ?? Consider using "field:" instead of ".field" for performance (easier to remove from
-  the end than the start)
+- [X] ?? Consider using "field:" instead of ".field" for performance (easier to remove from
+      the end than the start) (now it uses plain name)
 - [ ] ?? Consider having a generic template parser rather than one that depends on Kdl
-  it would just wrap another Deserializer. => Check [design decision]
-- [ ] Fix broken links in READMEs
+      it would just wrap another Deserializer. => Check [design decision]
+- [X] Fix broken links in READMEs
 - [ ] Add "kdl markers" to nodes spawned, so that it might be eventually
-  possible to round-trip the world, for 
+      possible to round-trip the world, for 
 - [ ] Read and add to assets the last node in the kdl file
 - [ ] Check for `Added<Handle<Cuddly>>` and add scene
 - [ ] ?? Enable usage of kdl type specifiers and checking against expected values
