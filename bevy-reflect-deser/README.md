@@ -20,14 +20,14 @@ Features:
 
 Add this to your `Cargo.toml`:
 ```toml
-bevy-reflect-deser = "0.2"
+bevy-reflect-deser = "0.3.0"
 bevy_reflect = "0.8.0"
 ```
 
 If you do not want the `fancy-errors` feature, you should disable it this way:
 
 ```toml
-bevy-reflect-deser = { version = "0.2", no-default-features = true }
+bevy-reflect-deser = { version = "0.3.0", no-default-features = true }
 ```
 
 ## Limitations

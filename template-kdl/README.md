@@ -8,7 +8,7 @@ to attribute nodes to their proper position in the source reader.
 
 Add this to your `Cargo.toml`:
 ```toml
-template-kdl = "0.2"
+template-kdl = "0.3.0"
 ```
 
 ## Usage

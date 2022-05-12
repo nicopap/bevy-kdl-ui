@@ -11,7 +11,7 @@ Features:
 
 Add this to your `Cargo.toml`:
 ```toml
-bevy-kdl-scene = "0.2"
+bevy-kdl-scene = "0.3.0"
 ```
 
 ## Usage
