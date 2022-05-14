@@ -12,6 +12,7 @@ use template_kdl::{
 };
 
 use crate::err::{ConvResult, ConvertError};
+use crate::newtype::ExpectedType;
 use crate::visit::{FieldThunk, KdlConcrete, NodeThunkExt};
 use crate::DynRefl;
 
@@ -19,7 +20,7 @@ pub(crate) type MultiSpan<T> = MultiResult<T, Spanned<ConvertError>>;
 pub(crate) trait Infos {
     type DynamicWrapper: Builder<Info = Self>;
     fn name(&self) -> &'static str;
-    fn new_dynamic(&self, node: NodeThunkExt, reg: &TypeRegistry) -> MultiSpan<DynRefl> {
+    fn new_dynamic(&self, node: &NodeThunkExt, reg: &TypeRegistry) -> MultiSpan<DynRefl> {
         Self::DynamicWrapper::new_dynamic(self, node, reg)
     }
 }
@@ -55,12 +56,11 @@ pub(crate) fn get_named<'r>(name: &str, reg: &'r TypeRegistry) -> ConvResult<&'r
 // * declared is Some and does not match expected
 // * Any combination of the above
 // * Fatal: only if expected is not registered and (either declared is None or not registered)
-// TODO: multiple possible expected types (with preferences)
 fn type_info<'r>(
     reg: &'r TypeRegistry,
     declared: Option<&str>,
     expected: Option<&TypeIdentity>,
-) -> MultiResult<&'r TypeInfo, ConvertError> {
+) -> MultiResult<ExpectedType<'r>, ConvertError> {
     let mut errors = MultiError::default();
     let declared = declared.and_then(|name| errors.optionally(get_named(name, reg)));
     let expected_not_reg = || match expected {
@@ -76,12 +76,12 @@ fn type_info<'r>(
             let expected = expected.name().to_owned();
             let actual = declared.name().to_owned();
             errors.add_error(ConvertError::TypeMismatch { expected, actual });
-            errors.into_result(declared.type_info())
+            errors.into_result(ExpectedType::new(declared, reg))
         }
         // Either declared was not provided, or it was not registered (in which case
         // the error is already in `errors`) or it was provided, registered and matched
         // expected. And expected is registered
-        (Some(_) | None, Some(expected)) => errors.into_result(expected.type_info()),
+        (Some(_) | None, Some(expected)) => errors.into_result(ExpectedType::new(expected, reg)),
         // Either declared was not provided, or it was not registered (in which case
         // the error is already in `errors`) and expected is not registered
         // NOTE: This is the only Fatal error preventing any validation of what's inside.
@@ -91,7 +91,7 @@ fn type_info<'r>(
         // hoping to be useful
         (Some(declared), None) => {
             errors.add_error(expected_not_reg());
-            errors.into_result(declared.type_info())
+            errors.into_result(ExpectedType::new(declared, reg))
         }
     }
 }
@@ -256,7 +256,7 @@ pub(crate) trait Builder: Sized {
     fn complete(self) -> MultiResult<DynRefl, ConvertError>;
     fn new_dynamic(
         expected: &Self::Info,
-        node: NodeThunkExt,
+        node: &NodeThunkExt,
         reg: &TypeRegistry,
     ) -> MultiSpan<DynRefl> {
         let mut errors = MultiError::default();
@@ -281,12 +281,13 @@ impl Builder for ValueBuilder {
     }
     fn new_dynamic(
         expected: &Self::Info,
-        node: NodeThunkExt,
-        reg: &TypeRegistry,
+        node: &NodeThunkExt,
+        _: &TypeRegistry,
     ) -> MultiSpan<DynRefl> {
-        if let Some(first_field) = node.first_argument() {
-            first_field
-                .map_err(|v| KdlConcrete::from(v.clone()).dyn_value(expected.id(), reg))
+        if let Some(Spanned(span, value)) = node.first_argument() {
+            KdlConcrete::from(value.clone())
+                .into_dyn(&TypeInfo::Value(expected.clone()))
+                .map_err(|e| Spanned(span, e))
                 .into()
         } else {
             let span = node.span();
@@ -299,9 +300,8 @@ impl Builder for ValueBuilder {
 pub(crate) struct Wrapper<F, I, T> {
     acc: T,
     info: I,
-    // This exists so that it's possible to implement
-    // Builder separately for wrappers wrapping Field=()
-    // and Field=String. Not sure why, but it is
+    // This exists so that it's possible to implement Builder separately for
+    // wrappers wrapping Field=() and Field=String.
     _f: PhantomData<F>,
 }
 impl<T> Builder for Wrapper<(), T::Info, T>
@@ -325,7 +325,7 @@ where
         let expected = errors.optionally(expected.map_err(|e| Spanned(ty_span, e)));
         let try_ty = type_info(reg, opt_ty.map(|t| t.1), expected).map_err_span(ty_span);
         let ty = multi_try!(errors, try_ty);
-        let value = multi_try!(errors, field.value.into_dyn(ty, reg));
+        let value = multi_try!(errors, ty.into_dyn(field.value, reg));
         if let Err(err) = self.acc.add_boxed((), value) {
             errors.add_error(Spanned(ty_span, err));
         }
@@ -361,8 +361,10 @@ where
             let ty_span = opt_ty.map_or(name.0, |t| t.0);
             let try_ty = type_info(reg, opt_ty.map(|t| t.1), expected).map_err_span(ty_span);
             let ty = multi_try!(errors, try_ty);
-            let value = multi_try!(errors, field.value.into_dyn(ty, reg));
-            self.acc.add_boxed(name.1.to_owned(), value);
+            let value = multi_try!(errors, ty.into_dyn(field.value, reg));
+            if let Err(err) = self.acc.add_boxed(name.1.to_owned(), value) {
+                errors.add_error(Spanned(ty_span, err));
+            }
         } else {
             let err = ConvertError::UnnamedMapField { name: self.acc.type_name().to_owned() };
             errors.add_error(Spanned(field.span(), err));

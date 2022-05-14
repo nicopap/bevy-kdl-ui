@@ -6,6 +6,7 @@ use bevy_reflect::Reflect;
 
 mod dyn_wrappers;
 mod err;
+mod newtype;
 mod visit;
 
 pub use err::{ConvertError, ConvertErrors, ConvertResult};
@@ -111,9 +112,9 @@ mod test {
     #[test]
     fn test_component() {
         // for struct-type components
-        let kdl_foo = r#"Foo bar=1034 baz="hello" xo="B";"#;
-        let expected_foo = Foo { bar: 1034, baz: "hello".to_owned(), xo: B };
-        assert_eq!(parse_kdl::<Foo>(kdl_foo), Ok(expected_foo.clone()));
+        // let kdl_foo = r#"Foo bar=1034 baz="hello" xo="B";"#;
+        // let expected_foo = Foo { bar: 1034, baz: "hello".to_owned(), xo: B };
+        // assert_eq!(parse_kdl::<Foo>(kdl_foo), Ok(expected_foo.clone()));
 
         // For tuple-type components
         let kdl_bar = r#"Bar 3.0;"#;

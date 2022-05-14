@@ -44,9 +44,10 @@ See the relevant sections in the respective crate READMEs.
       primitive types & strings, and we are already cloning them a bunch)
 - [X] proper span-based error reporting
 - [X] Spanned smart pointer that forces updating offset when accessing a Kdl type
+- [X] Implment newtype unwrapping for compound types
 - [ ] Refactor
   - [X] `fns` => `template`
-  - [ ] Make sure the documentation reflects the actual syntax
+  - [X] Make sure the documentation reflects the actual syntax
   - [X] `Call*` => `*Thunk`
   - [X] Formalize and document difference between `Context` and `Bindings`
   - [X] Rename `Bindings`
@@ -54,9 +55,14 @@ See the relevant sections in the respective crate READMEs.
         to use multiple files
 - [X] Resolve the "variable scopping" problem.
 - [X] Document `fns` (mostly copy the section on top here)
+- [ ] `deser`: Implement all documented features that are currently commented-out in
+      integration tests.
+  - [ ] Anonymous tuples
+  - [ ] Struct with named field but not named in kdl file
+  - [ ] Hashmap tuple form
 - [ ] Deduplicate similar errors
 - [ ] Add context to field errors (encompassing struct, alternative possible names etc.)
-- [ ] FIX error message for too many fields in tupleStruct
+- [X] FIX error message for too many fields in tupleStruct
 - [X] FIX that we accept .N="foo" where N is out of bound for tupleStruct
       (actually removed the feature)
 - [X] FIX that we accept field reference mixup in tupleStruct
@@ -65,12 +71,14 @@ See the relevant sections in the respective crate READMEs.
 - [X] detect and parse `fn` nodes
 - [X] Expand `fn` nodes in the last node of file
 - [X] Expand `fn` nodes in other nodes
+- [ ] `deser`: do not store type names as string, rather just the TypeId. And
+      get back the string when building the final `ConvResults`
 - [ ] Actually use invocation arguments in `fn` expension
 - [ ] `expand` meta-node
 - [ ] add a `bundle` node so that it's possible to define multiple
       components at a time
 - [X] Formalize and list the bevy-reflect-deser format.
-- [ ] Add the README example in bevy-reflect-deser to rustdoc.
+- [X] Add the README example in bevy-reflect-deser to rustdoc.
 - [ ] rename `dyn_wrappers` in bevy-reflect-deser
 - [ ] ?? Make bevy-reflect-deser independent from tempalte-kdl
 - [X] ?? Consider using "field:" instead of ".field" for performance (easier to remove from
@@ -78,6 +86,7 @@ See the relevant sections in the respective crate READMEs.
 - [ ] ?? Consider having a generic template parser rather than one that depends on Kdl
       it would just wrap another Deserializer. => Check [design decision]
 - [X] Fix broken links in READMEs
+- [ ] Spaces and non-string map keys
 - [ ] Add "kdl markers" to nodes spawned, so that it might be eventually
       possible to round-trip the world, for 
 - [ ] Read and add to assets the last node in the kdl file

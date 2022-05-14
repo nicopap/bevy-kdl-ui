@@ -83,9 +83,7 @@ const KDL_DEFS: &[&str] = &[
     // Auto-unwrapping of newtypes is especially useful when you have a list of newtypes
     // Note that it is currently necessary to specify the field as `.0`
     // for more complex inner types.
-    r#"NewtypeContainer {
-          - nine=9  eight=8  seven=7  six=6  five=5  four=4  three=3  two=2  one=1
-    }"#,
+    r#"NewtypeContainer nine=9 eight=8 seven=7 six=6 five=5 four=4 three=3 two=2 one=1"#,
 ];
 fn main() -> Result<()> {
     macro_rules! reg_with {

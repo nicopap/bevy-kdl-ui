@@ -3,9 +3,7 @@ use std::{any::TypeId, fmt};
 
 use kdl::KdlDocument;
 
-use bevy_reflect::{
-    DynamicStruct, DynamicTuple, DynamicTupleStruct, TypeIdentity, TypeInfo, TypeRegistry,
-};
+use bevy_reflect::{TypeInfo, TypeRegistry};
 use kdl::KdlValue;
 use template_kdl::{
     multi_err::MultiResult,
@@ -13,11 +11,12 @@ use template_kdl::{
     template::{EntryThunk, NodeThunk},
 };
 
-use crate::dyn_wrappers::{get_named, Infos};
-use crate::err::{
-    ConvResult, ConvertError, ConvertError::GenericUnsupported as TODO, ConvertErrors,
+use crate::{
+    dyn_wrappers::{get_named, Infos},
+    err::{ConvertError, ConvertError::GenericUnsupported as TODO, ConvertErrors},
+    newtype::ExpectedType,
+    ConvertResult, DynRefl,
 };
-use crate::{ConvertResult, DynRefl};
 
 pub fn convert_doc(doc: &KdlDocument, registry: &TypeRegistry) -> ConvertResult<DynRefl> {
     let doc_repr = doc.to_string();
@@ -25,9 +24,11 @@ pub fn convert_doc(doc: &KdlDocument, registry: &TypeRegistry) -> ConvertResult<
     let (doc, errs) = template_kdl::read_document(doc);
     let doc = doc.unwrap(); // TODO(unwrap)
     let expected = get_named(doc.name().1, registry);
-    let expected = expected.unwrap().type_info(); // TODO(unwrap)
-    NodeThunkExt(doc)
-        .into_dyn(expected, registry)
+    let expected = expected.unwrap(); // TODO(unwrap)
+    let expected = ExpectedType::new(expected, registry);
+    let node = ValueExt::Node(NodeThunkExt(doc));
+    expected
+        .into_dyn(node, registry)
         .into_result()
         .map_err(|e| ConvertErrors::new(doc_repr, e))
 }
@@ -66,87 +67,14 @@ impl fmt::Display for KdlConcrete {
     }
 }
 impl KdlConcrete {
-    /// Try to get a DynRefl corresponding to provided `handle` type from this
-    /// [`KdlConcrete`].
-    ///
-    /// Inspects recursively newtype-style structs (aka structs will a single field) if
-    /// `handle` proves to be such a thing.
-    ///
-    /// This is useful to inline in entry position newtype struct.
-    pub(crate) fn dyn_value(
-        self,
-        handle: &TypeIdentity,
-        reg: &TypeRegistry,
-    ) -> ConvResult<DynRefl> {
-        self.dyn_value_newtypes(handle, reg, Vec::new())
-    }
-    /// Recursively resolves newtype structs attempting to summarize them into a primitive
-    /// type.
-    fn dyn_value_newtypes(
-        self,
-        handle: &TypeIdentity,
-        reg: &TypeRegistry,
-        mut wrappers: Vec<&'static str>,
-    ) -> ConvResult<DynRefl> {
-        use TypeInfo::{Struct, Tuple, TupleStruct, Value};
-        wrappers.push(handle.type_name());
-        let mismatch = |actual| {
-            || ConvertError::TypeMismatch {
-                expected: if wrappers.len() == 1 {
-                    wrappers[0].to_string()
-                } else {
-                    format!("any of {}", wrappers.join(", "))
-                },
-                actual,
-            }
-        };
-        macro_rules! create_dynamic {
-            (@insert DynamicStruct, $field:expr, $ret:expr, $val:expr) => (
-                $ret.insert_boxed($field.name(), $val)
-            );
-            (@insert $_1:ident, $_2:expr, $ret:expr, $val:expr) => ( $ret.insert_boxed($val) );
-            ($dynamic_kind:ident, $info:expr) => {{
-                // unwrap: we just checked that length == 1
-                let field = $info.field_at(0).unwrap();
-                let field_value = self.dyn_value_newtypes(field.id(), reg, wrappers)?;
-                let mut ret = $dynamic_kind::default();
-                ret.set_name(handle.type_name().to_string());
-                create_dynamic!(@insert $dynamic_kind, field, ret, field_value);
-                Ok(Box::new(ret))
-            }}
-        }
-        match reg.get_type_info(handle.type_id()) {
-            None => Err(ConvertError::NoSuchType(handle.type_name().to_string())),
-            Some(Struct(info)) if info.field_len() == 0 => {
-                match (self, reg.get(handle.type_id())) {
-                    (Self::Str(s), Some(reg)) if reg.short_name() == s || reg.name() == s => {
-                        let mut ret = DynamicStruct::default();
-                        ret.set_name(handle.type_name().to_string());
-                        Ok(Box::new(ret))
-                    }
-                    (_, None) => Err(ConvertError::NoSuchType(handle.type_name().to_string())),
-                    (s, Some(_)) => Err(mismatch(s.to_string())()),
-                }
-            }
-            Some(Struct(i)) if i.field_len() == 1 => create_dynamic!(DynamicStruct, i),
-            Some(Tuple(i)) if i.field_len() == 1 => create_dynamic!(DynamicTuple, i),
-            Some(TupleStruct(i)) if i.field_len() == 1 => create_dynamic!(DynamicTupleStruct, i),
-            Some(Value(info)) => {
-                let mismatch = mismatch(self.to_string());
-                self.dyn_primitive_value(info.id(), mismatch)
-            }
-            Some(_) => Err(mismatch(self.to_string())()),
-        }
-    }
-    // TODO: this probably works if we implemnt Deserialize on template-kdl
-    /// Converts a raw primitive type into `DynRefl`, making sure they have
-    /// the same type as the `handle` provides.
-    fn dyn_primitive_value(
-        self,
-        handle: &TypeIdentity,
-        mismatch: impl FnOnce() -> ConvertError,
-    ) -> ConvResult<DynRefl> {
+    // TODO: this probably works better if we implemnt Deserialize on template-kdl
+    pub(crate) fn into_dyn(&self, expected: &TypeInfo) -> Result<DynRefl, ConvertError> {
         use KdlConcrete::*;
+        let expected = expected.id();
+        let mismatch = || ConvertError::TypeMismatch {
+            expected: expected.type_name().to_owned(),
+            actual: self.to_string(),
+        };
         macro_rules! int2dyn {
             (@opt $int_type:ty, $int_value:expr) => {{
                 Ok(Box::new(<$int_type>::try_from($int_value).ok()))
@@ -157,47 +85,58 @@ impl KdlConcrete {
                     .map::<DynRefl, _>(|i| Box::new(i))
             };
         }
-        let msg = "null values currently cannot be converted into rust types";
-        let unsupported = || Err(ConvertError::GenericUnsupported(msg.to_string()));
-        match (self, handle.type_id()) {
-            (Int(i), ty) if ty == TypeId::of::<i8>() => int2dyn!(i8, i),
-            (Int(i), ty) if ty == TypeId::of::<i16>() => int2dyn!(i16, i),
-            (Int(i), ty) if ty == TypeId::of::<i32>() => int2dyn!(i32, i),
-            (Int(i), ty) if ty == TypeId::of::<i64>() => Ok(Box::new(i)),
-            (Int(i), ty) if ty == TypeId::of::<i128>() => int2dyn!(i128, i),
-            (Int(i), ty) if ty == TypeId::of::<isize>() => int2dyn!(isize, i),
-            (Int(i), ty) if ty == TypeId::of::<u8>() => int2dyn!(u8, i),
-            (Int(i), ty) if ty == TypeId::of::<u16>() => int2dyn!(u16, i),
-            (Int(i), ty) if ty == TypeId::of::<u32>() => int2dyn!(u32, i),
-            (Int(i), ty) if ty == TypeId::of::<u64>() => int2dyn!(u64, i),
-            (Int(i), ty) if ty == TypeId::of::<u128>() => int2dyn!(u128, i),
-            (Int(i), ty) if ty == TypeId::of::<usize>() => int2dyn!(usize, i),
-            (Int(i), ty) if ty == TypeId::of::<Option<i8>>() => int2dyn!(@opt i8, i),
-            (Int(i), ty) if ty == TypeId::of::<Option<i16>>() => int2dyn!(@opt i16, i),
-            (Int(i), ty) if ty == TypeId::of::<Option<i32>>() => int2dyn!(@opt i32, i),
-            (Int(i), ty) if ty == TypeId::of::<Option<i64>>() => Ok(Box::new(Some(i))),
-            (Int(i), ty) if ty == TypeId::of::<Option<i128>>() => int2dyn!(@opt i128, i),
-            (Int(i), ty) if ty == TypeId::of::<Option<isize>>() => int2dyn!(@opt isize, i),
-            (Int(i), ty) if ty == TypeId::of::<Option<u8>>() => int2dyn!(@opt u8, i),
-            (Int(i), ty) if ty == TypeId::of::<Option<u16>>() => int2dyn!(@opt u16, i),
-            (Int(i), ty) if ty == TypeId::of::<Option<u32>>() => int2dyn!(@opt u32, i),
-            (Int(i), ty) if ty == TypeId::of::<Option<u64>>() => int2dyn!(@opt u64, i),
-            (Int(i), ty) if ty == TypeId::of::<Option<u128>>() => int2dyn!(@opt u128, i),
-            (Int(i), ty) if ty == TypeId::of::<Option<usize>>() => int2dyn!(@opt usize, i),
-            (Int(_), _) => Err(mismatch()),
-            (Float(f), ty) if ty == TypeId::of::<f32>() => Ok(Box::new(f as f32)),
-            (Float(f), ty) if ty == TypeId::of::<f64>() => Ok(Box::new(f)),
-            (Float(f), ty) if ty == TypeId::of::<Option<f32>>() => Ok(Box::new(Some(f as f32))),
-            (Float(f), ty) if ty == TypeId::of::<Option<f64>>() => Ok(Box::new(Some(f))),
-            (Float(_), _) => Err(mismatch()),
-            (Bool(b), ty) if ty == TypeId::of::<bool>() => Ok(Box::new(b)),
-            (Bool(b), ty) if ty == TypeId::of::<Option<bool>>() => Ok(Box::new(Some(b))),
-            (Bool(_), _) => Err(mismatch()),
-            (Str(s), ty) if ty == TypeId::of::<String>() => Ok(Box::new(s)),
-            (Str(s), ty) if ty == TypeId::of::<Option<String>>() => Ok(Box::new(Some(s))),
+        macro_rules! null2dyn {
+            ($ty_id:expr, $($convert_to:ty,)*) => {
+                $(  if $ty_id == TypeId::of::<Option<$convert_to>>() {
+                    Ok(Box::new(Option::<$convert_to>::None))
+                } else )* {
+                    // TODO: meaningfull error message on Option<Foo> where Foo is not primitive
+                    Err(mismatch())
+                }
+            };
+        }
+        match (self, expected.type_id()) {
+            (&Int(i), ty) if ty == TypeId::of::<i8>() => int2dyn!(i8, i),
+            (&Int(i), ty) if ty == TypeId::of::<i16>() => int2dyn!(i16, i),
+            (&Int(i), ty) if ty == TypeId::of::<i32>() => int2dyn!(i32, i),
+            (&Int(i), ty) if ty == TypeId::of::<i64>() => Ok(Box::new(i)),
+            (&Int(i), ty) if ty == TypeId::of::<i128>() => int2dyn!(i128, i),
+            (&Int(i), ty) if ty == TypeId::of::<isize>() => int2dyn!(isize, i),
+            (&Int(i), ty) if ty == TypeId::of::<u8>() => int2dyn!(u8, i),
+            (&Int(i), ty) if ty == TypeId::of::<u16>() => int2dyn!(u16, i),
+            (&Int(i), ty) if ty == TypeId::of::<u32>() => int2dyn!(u32, i),
+            (&Int(i), ty) if ty == TypeId::of::<u64>() => int2dyn!(u64, i),
+            (&Int(i), ty) if ty == TypeId::of::<u128>() => int2dyn!(u128, i),
+            (&Int(i), ty) if ty == TypeId::of::<usize>() => int2dyn!(usize, i),
+            (&Int(i), ty) if ty == TypeId::of::<Option<i8>>() => int2dyn!(@opt i8, i),
+            (&Int(i), ty) if ty == TypeId::of::<Option<i16>>() => int2dyn!(@opt i16, i),
+            (&Int(i), ty) if ty == TypeId::of::<Option<i32>>() => int2dyn!(@opt i32, i),
+            (&Int(i), ty) if ty == TypeId::of::<Option<i64>>() => Ok(Box::new(Some(i))),
+            (&Int(i), ty) if ty == TypeId::of::<Option<i128>>() => int2dyn!(@opt i128, i),
+            (&Int(i), ty) if ty == TypeId::of::<Option<isize>>() => int2dyn!(@opt isize, i),
+            (&Int(i), ty) if ty == TypeId::of::<Option<u8>>() => int2dyn!(@opt u8, i),
+            (&Int(i), ty) if ty == TypeId::of::<Option<u16>>() => int2dyn!(@opt u16, i),
+            (&Int(i), ty) if ty == TypeId::of::<Option<u32>>() => int2dyn!(@opt u32, i),
+            (&Int(i), ty) if ty == TypeId::of::<Option<u64>>() => int2dyn!(@opt u64, i),
+            (&Int(i), ty) if ty == TypeId::of::<Option<u128>>() => int2dyn!(@opt u128, i),
+            (&Int(i), ty) if ty == TypeId::of::<Option<usize>>() => int2dyn!(@opt usize, i),
+            (&Int(_), _) => Err(mismatch()),
+            (&Float(f), ty) if ty == TypeId::of::<f32>() => Ok(Box::new(f as f32)),
+            (&Float(f), ty) if ty == TypeId::of::<f64>() => Ok(Box::new(f)),
+            (&Float(f), ty) if ty == TypeId::of::<Option<f32>>() => Ok(Box::new(Some(f as f32))),
+            (&Float(f), ty) if ty == TypeId::of::<Option<f64>>() => Ok(Box::new(Some(f))),
+            (&Float(_), _) => Err(mismatch()),
+            (&Bool(b), ty) if ty == TypeId::of::<bool>() => Ok(Box::new(b)),
+            (&Bool(b), ty) if ty == TypeId::of::<Option<bool>>() => Ok(Box::new(Some(b))),
+            (&Bool(_), _) => Err(mismatch()),
+            (Str(s), ty) if ty == TypeId::of::<String>() => Ok(Box::new(s.clone())),
+            (Str(s), ty) if ty == TypeId::of::<Option<String>>() => Ok(Box::new(Some(s.clone()))),
             (Str(_), _) => Err(mismatch()),
 
-            (Null, _) => unsupported(),
+            (Null, ty) => null2dyn!(
+                ty, i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize, f32, f64, bool,
+                String,
+            ),
         }
     }
 }
@@ -207,22 +146,17 @@ pub(crate) enum ValueExt<'s> {
     Value(Spanned<&'s KdlValue>),
 }
 impl<'s> ValueExt<'s> {
-    pub(crate) fn into_dyn(
+    pub(crate) fn into_dyn<'a>(
         self,
-        expected: &TypeInfo,
-        reg: &TypeRegistry,
+        expected: &'a TypeInfo,
+        reg: &'a TypeRegistry,
     ) -> MultiResult<DynRefl, Spanned<ConvertError>> {
         match self {
             ValueExt::Node(node) => node.into_dyn(expected, reg),
-            ValueExt::Value(value) => value
-                .map_err(|value| KdlConcrete::from(value.clone()).dyn_value(expected.id(), reg))
+            ValueExt::Value(value) => KdlConcrete::from(value.1.clone())
+                .into_dyn(expected)
+                .map_err(|e| Spanned(value.0, e))
                 .into(),
-        }
-    }
-    fn span(&self) -> Span {
-        match self {
-            ValueExt::Node(n) => n.span(),
-            ValueExt::Value(v) => v.0,
         }
     }
 }
@@ -272,9 +206,6 @@ impl<'s> From<NodeThunk<'s>> for FieldThunk<'s> {
 pub(crate) struct NodeThunkExt<'s>(NodeThunk<'s>);
 
 impl<'s> NodeThunkExt<'s> {
-    fn name(&self) -> Spanned<&'s str> {
-        self.0.name()
-    }
     // TODO: actual error handling (eg: check there is not more than 1 etc.)
     pub(crate) fn first_argument(&self) -> Option<Spanned<&'s KdlValue>> {
         self.0.entries().next().map(|e| e.value())
@@ -288,7 +219,7 @@ impl<'s> NodeThunkExt<'s> {
         self.0.span()
     }
     fn into_dyn(
-        self,
+        &self,
         expected: &TypeInfo,
         reg: &TypeRegistry,
     ) -> MultiResult<DynRefl, Spanned<ConvertError>> {

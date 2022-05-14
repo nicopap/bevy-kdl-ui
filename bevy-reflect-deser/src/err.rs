@@ -79,6 +79,12 @@ pub enum ConvertError {
     UnnamedMapField { name: String },
     #[error("Field at component declaration site.")]
     BadComponentTypeName,
+    // #[error("As {newtype} unwrapped into {inner}: {err}")]
+    // NewtypeInner {
+    //     newtype: String,
+    //     inner: String,
+    //     err: Box<ConvertError>,
+    // },
 }
 impl ConvertError {
     #[cfg(feature = "fancy-errors")]

@@ -60,6 +60,73 @@ options:
   nodes.
 
 
+## bevy-reflect-deser
+
+### Newtype typing
+
+Problem: We want newtypes to be transparent. We should be capable of expecting
+several different types.
+
+Expected types are passed to `ValueExt::into_dyn` which itself forwards the
+expected values to `KdlConcrete::into_dyn` and `NodeThunkExt::into_dyn`.
+
+* `KdlConcrete::into_dyn` is used in `ValueBuilder::new_dynamic` and
+  `ValueExt::into_dyn`
+* `NodeThunkExt::into_dyn` in `convert_doc` and `ValueExt::into_dyn`
+* `ValueExt::into_dyn` in `Wrapper::add_field`, both `Builder` implementations
+
+Currently, KdlConcrete is where we list all expectable types for something. Which
+is not the right place. We should instead accept a _list of expected types_ and
+work based on that.
+
+Since `into_dyn` is mostly called in `add_field`, it means we have to create the
+list of expected types there.
+
+**How to generate the list of expected types?**: `newtype_wrapping` function in
+`dyn_wrapper` module. ⇒ **problem**: how to reconstruct the actual type from
+there?
+
+**Solution**: We crate a `ExpectedType` struct that both goes down the hierarchy
+and goes back up.
+
+### Error message spam
+
+```
+Error: 
+  × There is no such registered type: one
+   ╭────
+ 1 │ NewtypeContainer nine=9 eight=8 seven=7 six=6 five=5 four=4 three=3 two=2 one=1
+   ·                                                                           ────
+   ╰────
+  help: Try adding it to the type registry with `reg.register::<one>()`.
+Error: 
+  × Kdl declaration has type `int(1)` but rust type `HashMap<String, VeryNewtype>`
+  │ was expected
+   ╭────
+ 1 │ NewtypeContainer nine=9 eight=8 seven=7 six=6 five=5 four=4 three=3 two=2 one=1
+   ·                                                                               ─
+   ╰────
+  help: You probably meant to declare a HashMap<String, VeryNewtype>.
+```
+
+There are multiple problems with those error messages:
+* Because it expected `NewtypeContainer` which is a TupleStruct, it reads the name
+  of entries as the type declaration. But they are not types, so it fails to "find
+  it in the register". And displays a bad "helpfull" error message.
+* It repeats 2×9 times the same message, which is too much!
+* It suggested to add `one` as a type to register. But `one` is not a type! How
+  could we avoid giving that suggestion for things that are not types?
+
+
+#### Solution
+
+Difficult because parsing is general and this requires a specific solution.
+
+* fold all identical error messages from the same level into one.
+* in `type_info` raise a "not a type" error rather than "not registered"
+  if we can't find the `declared` type AND not uppercase AND ≠ "u8, u16 etc."
+
+
 
 [serde data model]: https://serde.rs/data-model.html
 [serde_kdl]: https://crates.io/crates/serde_kdl

@@ -45,12 +45,12 @@ Thanks to the excellent `Typed` API added to `bevy_reflect` in version
 `Box<dyn Reflect>` with extremely tight type checking. This crate provides
 just that.
 
-```kdl
-Foo .name="西安" {
+```kdl, 1
+Foo name="西安" {
   // Tuples and tuple structs are anonymous
-  .coordinates .1=34.265 .0=108.954
-  .populations 12953000 429496 1353000
-  .notable_place "Terracota army" 
+  coordinates 108.95 434.265
+  populations 12953000 429496 1353000
+  notable_place "Terracota army" 
 }
 ```
 
@@ -88,8 +88,8 @@ fn main() {
   let foo = Foo::from_reflect(reflected.as_ref()).unwrap();
   let expected = Foo  {
     name:"西安".to_owned(),
-    coordinates: Coord(108.954,34.265),
-    populations: (12953000 429496 1353000),
+    coordinates: Coord(108.954, 34.265),
+    populations: (12953000, 429496, 1353000),
     notable_place: "Terracota army".to_owned(),
   };
   asset_eq!(foo, expected);
@@ -141,16 +141,15 @@ NodeName 12 true foo="bar" "more primitive types"
 
 ### Newtype structs
 
-structs with a single field, if the field can be represented as a kdl
-*entry value*, can itself be represented as an *entry value*.
+structs with a single field, can be shortened to the field itself.
 
 ```rust
 struct Newtype(usize);
 ```
 
 ```kdl
-NodeName 9999
-//       ^^^^
+- 9999
+//^^^^
 ```
 
 This is true even when the field has an explicit name.
@@ -162,8 +161,8 @@ struct NamedNewtype {
 ```
 
 ```kdl
-NodeName 9999
-//       ^^^^
+- 9999
+//^^^^
 ```
 
 Finally, this works recursively: the newtype itself can be represented as a
@@ -177,19 +176,32 @@ struct NamedNestedNewtype {
 ```
 
 ```kdl
-NodeName 9999
-//       ^^^^
+- 9999
+//^^^^
 ```
 
 If you want clarity. You can either use a kdl type declaration or build
 newtypes the same way as structs with primitive fields (just check the next
 section).
 
-```kdl
-NodeName (NamedNestedNewtype)9999
-//       ^^^^^^^^^^^^^^^^^^^^
+```kdl, 2
+"(NamedNestedNewtype, NamedNewtype, Newtype)" {
+  - (NamedNestedNewtype)1234
+//   ^^^^^^^^^^^^^^^^^^
+  - (NamedNewtype)2345
+  - (Newtype)3456
+}
 ```
 
+Newtypes do not only work with values, they also work with compound types.
+
+```rust
+struct VecNewtype(Vec<String>);
+```
+
+```kdl, 3
+VecNewtype "one" "two" "three" "four" "five"
+```
 
 
 ### Struct with primitive fields
@@ -206,21 +218,21 @@ declared as a kdl *node*. The *name* of the *node* usually is the rust type name
 fully qualified or shortened. The fields are *parameters* of the *node*.
 *Parameters* can be declared in arbitrary order.
 
-```kdl
+```kdl, 4
 SimpleFields second_field="Hello World" first_field=34
 ```
 
 It is possible to ommit the field name and exclusively use *arguments*. Hybrid
 argument/parameter declarations are not supported.
 
-```kdl
+```kdl, 5
 SimpleFields 34 "Hello World"
 ```
 
 The arguments must appear in the same order as the rust declaration order.
 Otherwise a type mistmach error will be raised.
 
-```kdl
+```kdl, 6
 // WARNING: this is an ERROR
 SimpleFields "Hello World" 34
 // It will cause a "TypeMismatch" error
@@ -230,7 +242,7 @@ It is also possible to represent the fields as *children nodes*. The *child
 node* *name* will be the field name, while its first argument will be the 
 field content:
 
-```kdl
+```kdl, 7
 SimpleFields {
   second_field "Hello World"
   first_field 34
@@ -240,7 +252,7 @@ SimpleFields {
 Note that this also works with newtype-style structs. Newtypes are not limited
 to value position.
 
-```kdl
+```kdl, 8
 NamedNewtype inner=9999
 ```
 
@@ -257,10 +269,10 @@ struct CompoundFields {
 Structs with fields that cannot fit in a kdl *value* must have their fields
 declared as children. 
 
-```kdl
+```kdl, 9
 CompoundFields {
   first "hello" "world"
-  second first_field=34 second_field="Hello world"
+  second first_field=34 second_field="Hello World"
   third 3
 }
 ```
@@ -269,10 +281,10 @@ Note that the type name of the field is replaced with the field name. If you
 want type-checking regardless, use the kdl type declaration syntax. If the field
 type doesn't match the declared type, a type mismatch error will occure.
 
-```kdl
+```kdl, 10
 CompoundFields {
   first "hello" "world"
-  (SimpleFields)second first_field=34 second_field="Hello world"
+  (SimpleFields)second first_field=34 second_field="Hello World"
   third 3
 }
 ```
@@ -280,10 +292,10 @@ CompoundFields {
 It is possible to mix kdl *parameter* field declaration with *node* field 
 declaration.
 
-```kdl
+```kdl, 11
 CompoundFields third=3 {
   first "hello" "world"
-  second first_field=34 second_field="Hello world"
+  second first_field=34 second_field="Hello World"
 }
 ```
 
@@ -300,7 +312,7 @@ struct NewtypeField {
 Since you can represent `Newtype` as a value, you can use the primitive fields
 struct syntax:
 
-```kdl
+```kdl, 12
 NewtypeField 9999 "Hello World"
 ```
 
@@ -310,21 +322,22 @@ NewtypeField 9999 "Hello World"
 Tuples work like conventional struct, appart that the node name is always `Tuple`
 and the field declaration is always sequential.
 ```rust
-type MyTuple = (u8, SimpleFields, String)
+type MyTuple = (u8, SimpleFields, String);
 ```
-```kdl
+```kdl, 13
 Tuple 25 {
-  - first_field=34 second_field="Hello world"
+  - first_field=34 second_field="Hello World"
   - "Tuple String"
 }
 ```
 
-Note that the *children* node names are ignored (unless they have a type name).
-By convention, we use the dash (`-`) 
+Note that the *children* node names should either be `-` to elide type
+specification or be the name of the field's type. Provided names actually
+type-checks the content of the field.
 
-```kdl
+```kdl, 14
 Tuple 25 {
-  CompoundFields first_field=34 second_field="Hello world"
+  CompoundFields first_field=34 second_field="Hello World"
   String "Tuple String"
   // WARNING: type ERROR, because `CompoundFields` does not
   // match the `SimpleFields` expected type.
@@ -341,7 +354,7 @@ level declaration.
 struct Fancy(String, u32);
 ```
 
-```kdl
+```kdl, 15
 Fancy "Hello" 9302
 ```
 
@@ -351,17 +364,35 @@ Fancy "Hello" 9302
 
 Types implementing `DynamicList` are represented as a list
 
-```kdl
-Vec 1 2 3 4 5 6 7 8 9 10
+```kdl, 16
+"Vec<usize>" 1 2 3 4 5 6 7 8 9 10
 ```
 
 #### HashMap
 
-Types implementing `DynamicMap` are represented as a key-value pairs. The keys
-are limited to `String` types for now.
-```kdl
-HashMap one=1 two=2 three=3 four=4 five=5
+Types implementing `DynamicMap` are represented as a key-value pairs.
+
+```kdl, 17
+"HashMap<String, u32>" one=1 two=2 three=3 four=4 five=5
 ```
+
+To have a key that is not a `String` type or a string that doesn't comply
+with the Kdl identifier rules you can use the special form:
+
+```kdl, 18
+"HashMap<String, u32>" {
+  - "one" 1
+  - "one many" 2 
+  - "one many and one" 3 
+  - "one bunch" 4 
+  - "one bunch and one" 5
+  - "one bunch one many" 6
+  - "one bunch one many and one" 7
+}
+```
+
+You basically declare a list of tuple `(Key, Value)`.
+
 
 #### Compound types
 
@@ -369,47 +400,34 @@ If the list or map contains a compound type in the style `Vec<Fancy>`, it must
 be declared as children node.
 
 
-```kdl
-// Vec<Fancy>
-Vec {
+```kdl, 19
+"Vec<Fancy>" {
   - "One thousand" 1000
   - "Two thousand" 2000
   - "Three thousand" 3000
   - "Four thousand" 4000
 }
-// HashMap<String, SimpleFields>
-HashMap {
-  ten 10 "Commandments"
-  seven 7 "Dwarves"
-  five 5 "Fingers"
-  four 4 "Cardinal directions"
+```
+  
+```kdl, 20
+"HashMap<String, SimpleFields>" {
+  ten first_field=10 second_field="Commandments"
+  seven first_field=7 second_field="Dwarves"
+  five first_field=5 second_field="Fingers"
+  four first_field=4 second_field="Cardinal directions"
 }
 ```
 
 Note that it also works with value types:
 
-```kdl
-// Vec<u8>
-Vec {
+```kdl, 21
+"Vec<u8>" {
   - 1
   - 2
   - 3
   - 4
 }
 ```
-
-### Newtype of compound types
-
-Newtypes do not only work with values, they also work with compound types.
-
-```rust
-struct VecNewtype(Vec<String>);
-```
-
-```kdl
-VecNewtype "one" "two" "three" "four" "five"
-```
-
 
 ### Typing
 
