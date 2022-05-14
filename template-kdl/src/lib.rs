@@ -30,6 +30,6 @@ fn read_thunk(document: &KdlDocument) -> MultiResult<NodeThunk, Spanned<Error>> 
     errors.into_result(NodeThunk::new(last_node, context))
 }
 
-pub fn read_document(document: &KdlDocument) -> (Option<NodeThunk>, Vec<Spanned<err::Error>>) {
-    read_thunk(document).into_tuple()
+pub fn read_document(document: &KdlDocument) -> MultiResult<NodeThunk, Spanned<err::Error>> {
+    read_thunk(document)
 }

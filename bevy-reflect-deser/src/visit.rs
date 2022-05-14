@@ -6,31 +6,34 @@ use kdl::KdlDocument;
 use bevy_reflect::{TypeInfo, TypeRegistry};
 use kdl::KdlValue;
 use template_kdl::{
-    multi_err::MultiResult,
+    multi_err::{MultiError, MultiErrorTrait, MultiResult},
     span::{Span, Spanned},
     template::{EntryThunk, NodeThunk},
 };
 
 use crate::{
-    dyn_wrappers::{get_named, Infos},
+    dyn_wrappers::{new_dynamic_anonstruct, type_info, Infos},
     err::{ConvertError, ConvertError::GenericUnsupported as TODO, ConvertErrors},
     newtype::ExpectedType,
     ConvertResult, DynRefl,
 };
 
 pub fn convert_doc(doc: &KdlDocument, registry: &TypeRegistry) -> ConvertResult<DynRefl> {
+    let mut errors = MultiError::default();
     let doc_repr = doc.to_string();
-    // TODO(errs)
-    let (doc, errs) = template_kdl::read_document(doc);
-    let doc = doc.unwrap(); // TODO(unwrap)
-    let expected = get_named(doc.name().1, registry);
-    let expected = expected.unwrap(); // TODO(unwrap)
-    let expected = ExpectedType::new(expected, registry);
-    let node = ValueExt::Node(NodeThunkExt(doc));
-    expected
-        .into_dyn(node, registry)
-        .into_result()
-        .map_err(|e| ConvertErrors::new(doc_repr, e))
+    let template_map = |err: Spanned<_>| err.map(ConvertError::Template);
+    if let Some(doc) = errors.optionally(template_kdl::read_document(doc).map_err(template_map)) {
+        let Spanned(name_span, name) = doc.name();
+        let expected = type_info(registry, Some(name), None).map_err_span(name_span);
+        let node = ValueExt::Node(NodeThunkExt(doc));
+        expected
+            .combine(errors)
+            .and_then(|e| e.into_dyn(node, registry))
+            .into_result()
+            .map_err(|e| ConvertErrors::new(doc_repr, e))
+    } else {
+        Err(ConvertErrors::new(doc_repr, errors.errors().to_vec()))
+    }
 }
 
 /// A proxy for [`KdlValue`] that doesn't care about the format of declaration.
@@ -143,6 +146,7 @@ impl KdlConcrete {
 
 pub(crate) enum ValueExt<'s> {
     Node(NodeThunkExt<'s>),
+    // TODO: the Value alt should encode expected type
     Value(Spanned<&'s KdlValue>),
 }
 impl<'s> ValueExt<'s> {
@@ -218,6 +222,9 @@ impl<'s> NodeThunkExt<'s> {
     pub(crate) fn span(&self) -> Span {
         self.0.span()
     }
+    fn is_anon(&self) -> bool {
+        self.fields().next().map_or(false, |e| e.name.is_none())
+    }
     fn into_dyn(
         &self,
         expected: &TypeInfo,
@@ -229,6 +236,7 @@ impl<'s> NodeThunkExt<'s> {
             List(v) => v.new_dynamic(self, reg),
             Tuple(v) => v.new_dynamic(self, reg),
             Value(v) => v.new_dynamic(self, reg),
+            Struct(v) if self.is_anon() => new_dynamic_anonstruct(v, self, reg),
             Struct(v) => v.new_dynamic(self, reg),
             TupleStruct(v) => v.new_dynamic(self, reg),
             v => MultiResult::Err(vec![Spanned(

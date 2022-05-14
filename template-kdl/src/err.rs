@@ -1,6 +1,6 @@
 use kdl::KdlValue;
 
-#[derive(Debug, thiserror::Error, PartialEq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq)]
 pub enum Error {
     #[error("Template parameters should have an explicit name, instead got {0:?}")]
     NonstringParam(KdlValue),

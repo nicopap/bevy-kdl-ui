@@ -128,6 +128,7 @@ mod test {
         // assert_eq!(parse_kdl::<E>("E \"Y\""), Ok(E::Y));
 
         assert_eq!(parse_kdl::<D>("D x=10;"), Ok(D { x: 10 }));
+        assert_eq!(parse_kdl::<D>("D 10;"), Ok(D { x: 10 }));
 
         assert_eq!(parse_kdl::<C>("C 22.0;"), Ok(C(22.0)));
 
@@ -140,8 +141,13 @@ mod test {
         );
         assert_eq!(
             // Arbitrary order
-            parse_kdl::<A>("A x=5151 { c 515.0; d x=155; }"),
+            parse_kdl::<A>("A x=5151 { c 515.0; d 155; }"),
             Ok(A { x: 5151, d: D { x: 155 }, c: C(515.0) })
+        );
+        assert_eq!(
+            // Anonymous declaration
+            parse_kdl::<A>("A 4144 { D x=441; C 414.0;}"),
+            Ok(A { x: 4144, d: D { x: 441 }, c: C(414.0) })
         );
         assert_eq!(
             // value type casting

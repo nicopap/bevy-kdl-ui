@@ -186,8 +186,8 @@ section).
 
 ```kdl, 2
 "(NamedNestedNewtype, NamedNewtype, Newtype)" {
-  - (NamedNestedNewtype)1234
-//   ^^^^^^^^^^^^^^^^^^
+  NamedNestedNewtype 1234
+//^^^^^^^^^^^^^^^^^^
   - (NamedNewtype)2345
   - (Newtype)3456
 }
@@ -222,6 +222,15 @@ fully qualified or shortened. The fields are *parameters* of the *node*.
 SimpleFields second_field="Hello World" first_field=34
 ```
 
+Naturally, if the fields are mispelled, it will result in an error:
+
+```kdl, 22
+// WARNING: this is an ERROR
+SimpleFields first_feild=34 second_feild="Hello World"
+//                  ^^              ^^
+// The fields are mispelled and do not exist in the `Simplefields` struct
+```
+
 It is possible to ommit the field name and exclusively use *arguments*. Hybrid
 argument/parameter declarations are not supported.
 
@@ -249,11 +258,45 @@ SimpleFields {
 }
 ```
 
-Note that this also works with newtype-style structs. Newtypes are not limited
-to value position.
+Fields of primitive types declared that way must have a single *argument*
+which is the value itself, precisely, they **must** be an *argument* and
+not a parameter.
+
+```kdl, 24
+// WARNING: this is an ERROR
+SimpleFields {
+  second_field "Hello World"
+  first_field first_field=34
+//            ^^^^^^^^^^^^
+// node-style primitive type declaration must be a single argument
+}
+```
+
+```kdl, 25
+// WARNING: this is an ERROR
+SimpleFields {
+  second_field "Hello World"
+  first_field 34 too="much" "more"
+//               ^^^^^^^^^^^^^^^^^
+// node-style primitive type declaration must be a single argument
+}
+```
+
+Note that you can declare newtype style structs the same way as any
+other structs. Newtypes are not limited to value position:
 
 ```kdl, 8
 NamedNewtype inner=9999
+```
+
+Conversly, mispelling the inner type with an explicit field declaration results
+in an error
+
+```kdl, 23
+// WARNING: this is an ERROR
+NamedNewtype iner=9999
+//           ^^^^
+// The inner field is mispelled, does not exist in NamedNewtype
 ```
 
 ### Structs with compound fields

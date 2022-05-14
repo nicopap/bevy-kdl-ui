@@ -1,3 +1,4 @@
+use std::any::{type_name, Any};
 use std::fmt;
 
 use bevy_reflect::{FromReflect, Reflect, TypeRegistration, TypeRegistry};
@@ -88,7 +89,23 @@ fn assert_eq_kdl<T: FromReflect + PartialEq + fmt::Debug>(
     println!("in section {section_no}");
     let converted = convert_doc(&text.parse().unwrap(), &reg)
         .map(|val| T::from_reflect(val.as_ref()).unwrap())?;
-    assert_eq!(&converted, value);
+    assert_eq!(&converted, value, "in {text}");
+    Ok(())
+}
+fn assert_fails_kdl<T: FromReflect + fmt::Debug + Any>(
+    section_no: u32,
+    text: &str,
+    reg: &TypeRegistry,
+) -> Result<(), ConvertErrors> {
+    println!("in section {section_no}");
+    let converted =
+        convert_doc(&text.parse().unwrap(), &reg).map(|val| T::from_reflect(val.as_ref()).unwrap());
+
+    assert!(
+        converted.is_err(),
+        "{converted:?}: {} in\n{text}",
+        type_name::<T>()
+    );
     Ok(())
 }
 
@@ -143,7 +160,7 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
         Newtype(3456),
     );
     let s3 = VecNewtype(string_vec!["one", "two", "three", "four", "five"]);
-    let s4_5_6 = SimpleFields {
+    let s4_5_7 = SimpleFields {
         second_field: "Hello World".to_owned(),
         first_field: 34,
     };
@@ -151,14 +168,14 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
     let s8 = NamedNewtype { inner: 9999 };
     let s9_10_11 = CompoundFields {
         first: string_vec!["hello", "world"],
-        second: s4_5_6.clone(),
+        second: s4_5_7.clone(),
         third: 3,
     };
     let s12 = NewtypeField {
         first_field: Newtype(9999),
         second_field: "Hello World".to_owned(),
     };
-    let s13 = (25, s4_5_6.clone(), "Tuple String".to_owned());
+    let s13 = (25, s4_5_7.clone(), "Tuple String".to_owned());
     // TODO 14
     let s15 = Fancy("Hello".to_owned(), 9302);
     let s16 = vec![1usize, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -182,17 +199,17 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
     assert_eq_kdl(1, sections[0].content, &s1, &reg)?;
     assert_eq_kdl(2, sections[1].content, &s2, &reg)?;
     assert_eq_kdl(3, sections[2].content, &s3, &reg)?;
-    assert_eq_kdl(4, sections[3].content, &s4_5_6, &reg)?;
-    // assert_eq_kdl(5, sections[4].content, &s4_5_6, &reg)?;
-    // assert_eq_kdl(6, sections[5].content, &s4_5_6, &reg)?;
-    // assert_eq_kdl(7, sections[6].content, &s7, &reg)?;
+    assert_eq_kdl(4, sections[3].content, &s4_5_7, &reg)?;
+    assert_eq_kdl(5, sections[4].content, &s4_5_7, &reg)?;
+    assert_fails_kdl::<SimpleFields>(6, sections[5].content, &reg)?;
+    assert_eq_kdl(7, sections[6].content, &s4_5_7, &reg)?;
     assert_eq_kdl(8, sections[7].content, &s8, &reg)?;
     assert_eq_kdl(9, sections[8].content, &s9_10_11, &reg)?;
     assert_eq_kdl(10, sections[9].content, &s9_10_11, &reg)?;
     assert_eq_kdl(11, sections[10].content, &s9_10_11, &reg)?;
-    // assert_eq_kdl(12, sections[11].content, &s12, &reg)?;
+    assert_eq_kdl(12, sections[11].content, &s12, &reg)?;
     // assert_eq_kdl(13, sections[12].content, &s13, &reg)?;
-    // assert_eq_kdl(14, sections[13].content, &s14, &reg)?;
+    assert_fails_kdl::<MyTuple>(14, sections[13].content, &reg)?;
     assert_eq_kdl(15, sections[14].content, &s15, &reg)?;
     assert_eq_kdl(16, sections[15].content, &s16, &reg)?;
     assert_eq_kdl(17, sections[16].content, &s17_18, &reg)?;
@@ -200,5 +217,9 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
     assert_eq_kdl(19, sections[18].content, &s19, &reg)?;
     assert_eq_kdl(20, sections[19].content, &s20, &reg)?;
     assert_eq_kdl(21, sections[20].content, &s21, &reg)?;
+    assert_fails_kdl::<SimpleFields>(22, sections[21].content, &reg)?;
+    assert_fails_kdl::<NamedNewtype>(23, sections[22].content, &reg)?;
+    assert_fails_kdl::<SimpleFields>(24, sections[23].content, &reg)?;
+    assert_fails_kdl::<NamedNewtype>(25, sections[24].content, &reg)?;
     Ok(())
 }

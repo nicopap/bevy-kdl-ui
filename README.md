@@ -58,7 +58,7 @@ See the relevant sections in the respective crate READMEs.
 - [ ] `deser`: Implement all documented features that are currently commented-out in
       integration tests.
   - [ ] Anonymous tuples
-  - [ ] Struct with named field but not named in kdl file
+  - [X] Struct with named field but not named in kdl file
   - [ ] Hashmap tuple form
 - [ ] Deduplicate similar errors
 - [ ] Add context to field errors (encompassing struct, alternative possible names etc.)

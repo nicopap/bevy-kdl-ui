@@ -1,3 +1,5 @@
+use std::mem;
+
 use crate::span::{Span, Spanned};
 
 // TODO(perf): it is probably more efficient to use a im::Vector here instead
@@ -98,6 +100,41 @@ pub enum MultiResult<T, E> {
     Err(Vec<E>),
 }
 
+impl<T, E> MultiErrorTrait for MultiResult<T, E> {
+    type Error = E;
+
+    fn add_error(&mut self, err: impl Into<E>) {
+        match self {
+            MultiResult::Ok(_) => {
+                if let MultiResult::Ok(old) = mem::replace(self, MultiResult::Err(Vec::new())) {
+                    *self = MultiResult::OkErr(old, vec![err.into()]);
+                }
+            }
+            MultiResult::OkErr(_, errs) => {
+                errs.push(err.into());
+            }
+            MultiResult::Err(errs) => {
+                errs.push(err.into());
+            }
+        }
+    }
+    fn extend_errors(&mut self, additional: impl IntoIterator<Item = E>) {
+        match self {
+            MultiResult::Ok(_) => {
+                if let MultiResult::Ok(old) = mem::replace(self, MultiResult::Err(Vec::new())) {
+                    *self = MultiResult::OkErr(old, additional.into_iter().collect());
+                }
+            }
+            MultiResult::OkErr(_, errs) => {
+                errs.extend(additional);
+            }
+            MultiResult::Err(errs) => {
+                errs.extend(additional);
+            }
+        }
+    }
+}
+
 impl<T, E> MultiResult<T, E> {
     pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> MultiResult<U, E> {
         match self {
@@ -133,6 +170,17 @@ impl<T, E> MultiResult<T, E> {
             MultiResult::Err(mut errs) => {
                 errs.extend(errors.0);
                 MultiResult::Err(errs)
+            }
+        }
+    }
+    pub fn and_then<U, F: FnOnce(T) -> MultiResult<U, E>>(self, f: F) -> MultiResult<U, E> {
+        match self {
+            MultiResult::Ok(t) => f(t),
+            MultiResult::Err(errs) => MultiResult::Err(errs),
+            MultiResult::OkErr(t, errs) => {
+                let mut result_u = f(t);
+                result_u.extend_errors(errs);
+                result_u
             }
         }
     }

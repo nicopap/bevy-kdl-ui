@@ -11,10 +11,12 @@ use template_kdl::{
     span::Spanned,
 };
 
-use crate::err::{ConvResult, ConvertError};
-use crate::newtype::ExpectedType;
-use crate::visit::{FieldThunk, KdlConcrete, NodeThunkExt};
-use crate::DynRefl;
+use crate::{
+    err::{ConvResult, ConvertError},
+    newtype::ExpectedType,
+    visit::{FieldThunk, KdlConcrete, NodeThunkExt},
+    DynRefl,
+};
 
 pub(crate) type MultiSpan<T> = MultiResult<T, Spanned<ConvertError>>;
 pub(crate) trait Infos {
@@ -24,6 +26,9 @@ pub(crate) trait Infos {
         Self::DynamicWrapper::new_dynamic(self, node, reg)
     }
 }
+trait FromInfo<I> {
+    fn from_info(i: I) -> Self;
+}
 macro_rules! impl_infos {
     ($ty_name:ty, $field:ty, $dynamic:ty) => {
         impl Infos for $ty_name {
@@ -32,7 +37,19 @@ macro_rules! impl_infos {
                 self.id().type_name()
             }
         }
+        impl<'i> FromInfo<&'i $ty_name> for $dynamic {
+            fn from_info(_: &'i $ty_name) -> Self {
+                <$dynamic as Default>::default()
+            }
+        }
     };
+}
+pub(crate) fn new_dynamic_anonstruct(
+    info: &StructInfo,
+    node: &NodeThunkExt,
+    reg: &TypeRegistry,
+) -> MultiSpan<DynRefl> {
+    Wrapper::<(), _, AnonDynamicStruct>::new_dynamic(info, node, reg)
 }
 impl_infos! {MapInfo, String, DynamicMap}
 impl_infos! {StructInfo, String, DynamicStruct}
@@ -45,6 +62,7 @@ impl Infos for ValueInfo {
         self.id().type_name()
     }
 }
+
 pub(crate) fn get_named<'r>(name: &str, reg: &'r TypeRegistry) -> ConvResult<&'r TypeRegistration> {
     reg.get_with_name(name)
         .or_else(|| reg.get_with_short_name(name))
@@ -56,19 +74,20 @@ pub(crate) fn get_named<'r>(name: &str, reg: &'r TypeRegistry) -> ConvResult<&'r
 // * declared is Some and does not match expected
 // * Any combination of the above
 // * Fatal: only if expected is not registered and (either declared is None or not registered)
-fn type_info<'r>(
+pub(crate) fn type_info<'r>(
     reg: &'r TypeRegistry,
     declared: Option<&str>,
     expected: Option<&TypeIdentity>,
 ) -> MultiResult<ExpectedType<'r>, ConvertError> {
     let mut errors = MultiError::default();
     let declared = declared.and_then(|name| errors.optionally(get_named(name, reg)));
-    let expected_not_reg = || match expected {
-        Some(expected) => ConvertError::NoSuchType(expected.type_name().to_owned()),
-        None => ConvertError::NoStaticallyDeducedType,
+    let get_from_reg = |e: &TypeIdentity| {
+        errors.optionally(
+            reg.get(e.type_id())
+                .ok_or_else(|| ConvertError::NoSuchType(e.type_name().to_owned())),
+        )
     };
-    let expected = expected.and_then(|e| reg.get(e.type_id()));
-    match (declared, expected) {
+    match (declared, expected.and_then(get_from_reg)) {
         // Both declared and expected are registered, but they are not equal
         // We chose `declared` since that's what is in the file, so we expect that
         // the rest of the file uses the declaredly stated type.
@@ -85,25 +104,23 @@ fn type_info<'r>(
         // Either declared was not provided, or it was not registered (in which case
         // the error is already in `errors`) and expected is not registered
         // NOTE: This is the only Fatal error preventing any validation of what's inside.
-        (None, None) => errors.into_errors(expected_not_reg()),
+        (None, None) => errors.into_errors(ConvertError::UntypedTupleField),
         // declared type exists, but is not equal to expected one, and the
         // expected one is not registered. This is an error, but we continue,
         // hoping to be useful
-        (Some(declared), None) => {
-            errors.add_error(expected_not_reg());
-            errors.into_result(ExpectedType::new(declared, reg))
-        }
+        (Some(declared), None) => errors.into_result(ExpectedType::new(declared, reg)),
     }
 }
 
 type Tid = TypeIdentity;
-pub(crate) trait Primitive: Reflect {
+pub(crate) trait Primitive {
     type Field;
     type Info: Infos;
     fn set_name(&mut self, name: String);
     fn add_boxed(&mut self, field: Self::Field, boxed: DynRefl) -> ConvResult<()>;
     fn expected<'i>(&self, at_field: &Self::Field, info: &'i Self::Info) -> ConvResult<&'i Tid>;
     fn validate(&self, info: &Self::Info) -> ConvResult<()>;
+    fn reflect(self) -> Box<dyn Reflect>;
 }
 
 impl Primitive for DynamicMap {
@@ -125,6 +142,9 @@ impl Primitive for DynamicMap {
     }
     fn validate(&self, _: &Self::Info) -> ConvResult<()> {
         Ok(())
+    }
+    fn reflect(self) -> Box<dyn Reflect> {
+        Box::new(self)
     }
 }
 impl Primitive for DynamicStruct {
@@ -168,6 +188,58 @@ impl Primitive for DynamicStruct {
             Ok(())
         }
     }
+    fn reflect(self) -> Box<dyn Reflect> {
+        Box::new(self)
+    }
+}
+struct AnonDynamicStruct(DynamicStruct, StructInfo);
+
+impl AnonDynamicStruct {
+    fn new(info: &StructInfo) -> Self {
+        Self(DynamicStruct::default(), info.clone())
+    }
+}
+impl<'i> FromInfo<&'i StructInfo> for AnonDynamicStruct {
+    fn from_info(i: &'i StructInfo) -> Self {
+        Self::new(i)
+    }
+}
+impl Primitive for AnonDynamicStruct {
+    type Field = ();
+    type Info = StructInfo;
+    fn add_boxed(&mut self, _: (), boxed: DynRefl) -> ConvResult<()> {
+        let next_index = self.0.field_len();
+        let next_field = self.1.field_at(next_index).unwrap();
+        self.0.insert_boxed(next_field.name(), boxed);
+        Ok(())
+    }
+    fn expected<'i>(&self, _: &(), info: &'i Self::Info) -> ConvResult<&'i Tid> {
+        let requested = self.0.field_len();
+        let err = || ConvertError::TooManyTupleStructFields {
+            name: info.name(),
+            actual: info.field_len() as u8,
+            requested: requested as u8,
+        };
+        info.field_at(requested).ok_or_else(err).map(|f| f.id())
+    }
+    fn set_name(&mut self, name: String) {
+        self.0.set_name(name);
+    }
+    fn validate(&self, info: &Self::Info) -> ConvResult<()> {
+        // The only possible error here is that there are not enough fields, since we
+        // already check for too many, and we assume the correct types are provided.
+        let actual = self.0.field_len() as u8;
+        let expected = info.field_len() as u8;
+        if actual != expected {
+            // TODO(reporting): Have a variant where the type name is stored
+            Err(ConvertError::NotEnoughTupleFields { actual, expected })
+        } else {
+            Ok(())
+        }
+    }
+    fn reflect(self) -> Box<dyn Reflect> {
+        Box::new(self.0)
+    }
 }
 impl Primitive for DynamicList {
     type Field = ();
@@ -184,6 +256,9 @@ impl Primitive for DynamicList {
     }
     fn validate(&self, _: &Self::Info) -> ConvResult<()> {
         Ok(())
+    }
+    fn reflect(self) -> Box<dyn Reflect> {
+        Box::new(self)
     }
 }
 impl Primitive for DynamicTuple {
@@ -214,6 +289,9 @@ impl Primitive for DynamicTuple {
         } else {
             Ok(())
         }
+    }
+    fn reflect(self) -> Box<dyn Reflect> {
+        Box::new(self)
     }
 }
 impl Primitive for DynamicTupleStruct {
@@ -246,6 +324,9 @@ impl Primitive for DynamicTupleStruct {
         } else {
             Ok(())
         }
+    }
+    fn reflect(self) -> Box<dyn Reflect> {
+        Box::new(self)
     }
 }
 
@@ -306,12 +387,12 @@ pub(crate) struct Wrapper<F, I, T> {
 }
 impl<T> Builder for Wrapper<(), T::Info, T>
 where
-    T: Primitive<Field = ()> + Default,
+    T: Primitive<Field = ()> + for<'a> FromInfo<&'a T::Info>,
     T::Info: Clone,
 {
     type Info = T::Info;
     fn new(expected: &Self::Info) -> Self {
-        let mut acc = T::default();
+        let mut acc = T::from_info(expected);
         acc.set_name(expected.name().to_owned());
         Self { acc, info: expected.clone(), _f: PhantomData }
     }
@@ -334,18 +415,17 @@ where
     fn complete(self) -> MultiResult<DynRefl, ConvertError> {
         let mut errors = MultiError::default();
         let _ = errors.optionally(self.acc.validate(&self.info));
-        let ret: DynRefl = Box::new(self.acc);
-        errors.into_result(ret)
+        errors.into_result(self.acc.reflect())
     }
 }
 impl<T> Builder for Wrapper<String, T::Info, T>
 where
-    T: Primitive<Field = String> + Default,
+    T: Primitive<Field = String> + for<'a> FromInfo<&'a T::Info>,
     T::Info: Clone,
 {
     type Info = T::Info;
     fn new(expected: &T::Info) -> Self {
-        let mut acc = T::default();
+        let mut acc = T::from_info(expected);
         acc.set_name(expected.name().to_owned());
         Self { acc, info: expected.clone(), _f: PhantomData }
     }
@@ -366,7 +446,7 @@ where
                 errors.add_error(Spanned(ty_span, err));
             }
         } else {
-            let err = ConvertError::UnnamedMapField { name: self.acc.type_name().to_owned() };
+            let err = ConvertError::UnnamedMapField { name: self.info.name().to_owned() };
             errors.add_error(Spanned(field.span(), err));
         }
         errors.into_result(())
@@ -374,7 +454,6 @@ where
     fn complete(self) -> MultiResult<DynRefl, ConvertError> {
         let mut errors = MultiError::default();
         let _ = errors.optionally(self.acc.validate(&self.info));
-        let ret: DynRefl = Box::new(self.acc);
-        errors.into_result(ret)
+        errors.into_result(self.acc.reflect())
     }
 }

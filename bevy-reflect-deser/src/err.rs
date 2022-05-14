@@ -32,7 +32,7 @@ mod miette_compat {
 use miette_compat::*;
 
 /// Ways for the conversion from KDL to Reflect to fail
-#[derive(Debug, thiserror::Error, PartialEq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq)]
 pub enum ConvertError {
     #[error("This operation is unsupported: {0}")]
     GenericUnsupported(String),
@@ -47,8 +47,8 @@ pub enum ConvertError {
     NoSuchType(String),
     #[error("Expected a value in first entry field for type: {0}, got nothing")]
     NoValuesInNode(&'static str),
-    #[error("It is not possible to statically deduce this type, this is likely caused by a mispelled field")]
-    NoStaticallyDeducedType,
+    #[error("Anon tuples with unkown type had a field with unknown type")]
+    UntypedTupleField,
     #[error("The field {field} is declared multiple time for struct {name}")]
     MultipleSameField { name: String, field: String },
     #[error("{requested} is not a field of {name}")]
