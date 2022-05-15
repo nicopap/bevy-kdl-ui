@@ -57,7 +57,7 @@ See the relevant sections in the respective crate READMEs.
 - [X] Document `fns` (mostly copy the section on top here)
 - [ ] `deser`: Implement all documented features that are currently commented-out in
       integration tests.
-  - [ ] Anonymous tuples
+  - [X] Anonymous tuples
   - [X] Struct with named field but not named in kdl file
   - [ ] Hashmap tuple form
 - [ ] Deduplicate similar errors

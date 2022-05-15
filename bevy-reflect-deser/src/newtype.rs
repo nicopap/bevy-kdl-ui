@@ -13,6 +13,9 @@ pub(crate) struct ExpectedType<'r> {
     tys: Vec<&'r TypeInfo>,
 }
 impl<'r> ExpectedType<'r> {
+    pub(crate) fn tuple() -> Self {
+        Self { tys: vec![] }
+    }
     // TODO(PERF): this is extremely inneficient for deeply nested newtypes that are
     // declared as the topmost type (ie: not using the shortcut syntax) since
     // for each level of nest, we visit all inner nests one more time.
@@ -22,6 +25,9 @@ impl<'r> ExpectedType<'r> {
         reg: &'r TypeRegistry,
     ) -> MultiResult<DynRefl, Spanned<ConvertError>> {
         use MultiResult::Ok as MultiOk;
+        if self.tys.is_empty() {
+            return field.value.into_dyn(None, reg);
+        }
         // build the whole type from the most inner type. The most inner type is the last
         // of the `tys` array. The goal is to build a `foo` which is the most outer type
         // of the newtype. We can only build the `foo` if we have the `bars` that are inner
@@ -30,7 +36,7 @@ impl<'r> ExpectedType<'r> {
         let mut tys = self.tys.into_iter().rev();
         // unwrap: only constructor has at least one element to tys
         let first = tys.next().unwrap();
-        let mut inner = field.value.into_dyn(first, reg);
+        let mut inner = field.value.into_dyn(Some(first), reg);
         for ty in tys {
             match (&mut inner, ty) {
                 (MultiOk(ref mut inner), TypeInfo::Struct(info)) => {
@@ -56,7 +62,7 @@ impl<'r> ExpectedType<'r> {
                     *inner = Box::new(acc);
                 }
                 _ => {
-                    inner = field.value.into_dyn(ty, reg);
+                    inner = field.value.into_dyn(Some(ty), reg);
                 }
             }
         }

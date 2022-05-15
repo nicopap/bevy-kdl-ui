@@ -80,11 +80,21 @@ pub(crate) fn type_info<'r>(
     expected: Option<&TypeIdentity>,
 ) -> MultiResult<ExpectedType<'r>, ConvertError> {
     let mut errors = MultiError::default();
-    let declared = declared.and_then(|name| errors.optionally(get_named(name, reg)));
     let no_such = |e: &TypeIdentity| ConvertError::NoSuchType(e.type_name().to_owned());
     let get_from_reg =
         |e: &TypeIdentity| errors.optionally(reg.get(e.type_id()).ok_or_else(|| no_such(e)));
-    match (declared, expected.and_then(get_from_reg)) {
+    let expected = expected.and_then(get_from_reg);
+    match (declared, expected) {
+        (Some("Tuple"), Some(expected)) => {
+            return errors.into_result(ExpectedType::new(expected, reg))
+        }
+        (Some("Tuple"), None) => {
+            return errors.into_result(ExpectedType::tuple());
+        }
+        _ => {}
+    }
+    let declared = declared.and_then(|name| errors.optionally(get_named(name, reg)));
+    match (declared, expected) {
         // Both declared and expected are registered, but they are not equal
         // We chose `declared` since that's what is in the file, so we expect that
         // the rest of the file uses the declaredly stated type.
@@ -108,7 +118,6 @@ pub(crate) fn type_info<'r>(
         (Some(declared), None) => errors.into_result(ExpectedType::new(declared, reg)),
     }
 }
-
 type Tid = TypeIdentity;
 pub(crate) trait Primitive {
     type Field;
@@ -189,6 +198,46 @@ impl Primitive for DynamicStruct {
         Box::new(self)
     }
 }
+
+// TODO(??): consider explicit declaration of tuple length
+pub(crate) struct AnonTupleInfo;
+impl Infos for AnonTupleInfo {
+    type DynamicWrapper = AnonTupleBuilder;
+    fn name(&self) -> &'static str {
+        "Tuple"
+    }
+}
+pub(crate) struct AnonTupleBuilder(DynamicTuple);
+impl Builder for AnonTupleBuilder {
+    type Info = AnonTupleInfo;
+
+    fn new(_: &Self::Info) -> Self {
+        Self(DynamicTuple::default())
+    }
+
+    fn add_field(&mut self, field: FieldThunk, reg: &TypeRegistry) -> MultiSpan<()> {
+        let mut errors = MultiError::default();
+        if let Some(Spanned(ty_span, ty_name)) = field.ty.or(field.name) {
+            let declared = get_named(ty_name, reg).map_err(|e| Spanned(ty_span, e));
+            let declared = multi_try!(errors, declared);
+            let declared = TypeIdentity::new(declared.name(), declared.type_id());
+            let try_ty = type_info(reg, None, Some(&declared)).map_err_span(ty_span);
+            let ty = multi_try!(errors, try_ty);
+            let value = multi_try!(errors, ty.into_dyn(field, reg));
+            self.0.insert_boxed(value);
+            MultiResult::Ok(())
+        } else {
+            let with_span = |e| Spanned(field.span(), e);
+            MultiResult::Err(vec![with_span(ConvertError::UntypedTupleField)])
+        }
+    }
+
+    fn complete(self) -> MultiResult<DynRefl, ConvertError> {
+        MultiResult::Ok(Box::new(self.0))
+    }
+}
+
+/// A Builder for structs declared with anonymous fields.
 struct AnonDynamicStruct(DynamicStruct, StructInfo);
 
 impl AnonDynamicStruct {

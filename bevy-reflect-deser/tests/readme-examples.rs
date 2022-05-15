@@ -60,6 +60,8 @@ struct NewtypeField {
     second_field: String,
 }
 type MyTuple = (u8, SimpleFields, String);
+#[derive(Reflect, Debug, FromReflect, PartialEq)]
+struct ContainsMyTuple(MyTuple);
 
 #[derive(Reflect, Debug, FromReflect, PartialEq)]
 struct Fancy(String, u32);
@@ -91,7 +93,7 @@ fn assert_all_lines_eq_kdl<T: FromReflect + PartialEq + fmt::Debug + Any>(
 ) -> Result<(), ConvertErrors> {
     println!("in section {section_no}");
     for (i, line) in text.lines().enumerate() {
-        println!("line {i}");
+        println!("########### line {i} ###############\n---------------------");
         let converted = from_doc::<T>(&line.parse().unwrap(), &reg)
             .map(|val| T::from_reflect(val.as_ref()).unwrap())?;
         assert_eq!(&converted, value, "in {line}");
@@ -107,6 +109,18 @@ fn assert_eq_kdl<T: FromReflect + PartialEq + fmt::Debug>(
 ) -> Result<(), ConvertErrors> {
     println!("in section {section_no}");
     let converted = convert_doc(&text.parse().unwrap(), &reg)
+        .map(|val| T::from_reflect(val.as_ref()).unwrap())?;
+    assert_eq!(&converted, value, "in {text}");
+    Ok(())
+}
+fn assert_eq_kdl_expecting<T: Any + FromReflect + PartialEq + fmt::Debug>(
+    section_no: u32,
+    text: &str,
+    value: &T,
+    reg: &TypeRegistry,
+) -> Result<(), ConvertErrors> {
+    println!("in section {section_no}");
+    let converted = from_doc::<T>(&text.parse().unwrap(), &reg)
         .map(|val| T::from_reflect(val.as_ref()).unwrap())?;
     assert_eq!(&converted, value, "in {text}");
     Ok(())
@@ -155,7 +169,8 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
     #[rustfmt::skip]
     register_all!(
         Coord, Foo, Newtype, NamedNewtype, NamedNestedNewtype, VecNewtype, SimpleFields,
-        CompoundFields, NewtypeField, Fancy, u8, u32, usize, String, u64, f64
+        CompoundFields, NewtypeField, Fancy, u8, u32, usize, String, u64, f64,
+        ContainsMyTuple,
     );
     #[rustfmt::skip]
     register_more!(
@@ -193,7 +208,7 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
         first_field: Newtype(9999),
         second_field: "Hello World".to_owned(),
     };
-    let s13 = (25, s4_5_7.clone(), "Tuple String".to_owned());
+    let s13_29 = ContainsMyTuple((25, s4_5_7.clone(), "Tuple String".to_owned()));
     let s15 = Fancy("Hello".to_owned(), 9302);
     let s16 = vec![1usize, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     let s17_18 = map! {"one" => 1u32, "two" => 2, "three" => 3, "four" => 4, "five" => 5};
@@ -226,7 +241,7 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
     assert_eq_kdl(10, sections[9].content, &s9_10_11, &reg)?;
     assert_eq_kdl(11, sections[10].content, &s9_10_11, &reg)?;
     assert_eq_kdl(12, sections[11].content, &s12, &reg)?;
-    // assert_eq_kdl(13, sections[12].content, &s13, &reg)?;
+    assert_eq_kdl(13, sections[12].content, &s13_29, &reg)?;
     assert_fails_kdl::<MyTuple>(14, sections[13].content, &reg)?;
     assert_eq_kdl(15, sections[14].content, &s15, &reg)?;
     assert_eq_kdl(16, sections[15].content, &s16, &reg)?;
@@ -241,5 +256,7 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
     assert_fails_kdl::<NamedNewtype>(25, sections[24].content, &reg)?;
     assert_eq_kdl(26, sections[25].content, &s3_26, &reg)?;
     assert_all_lines_eq_kdl(27, sections[26].content, &s27, &reg)?;
+    assert_fails_kdl::<MyTuple>(28, sections[27].content, &reg)?;
+    assert_eq_kdl(29, sections[28].content, &s13_29.0, &reg)?;
     Ok(())
 }

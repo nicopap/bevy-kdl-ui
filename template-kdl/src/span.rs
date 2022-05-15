@@ -128,8 +128,7 @@ impl OffsetExt for KdlEntry {
     type Out = EntrySizes;
     fn sizes(&self) -> EntrySizes {
         let leading = self.leading().size();
-        // TODO: kdl-rs doesn't expose the ty of nodes
-        let ty = 0; //self.ty().map_or(0, |t| t.size() + 2);
+        let ty = self.ty().map_or(0, |t| t.size() + 2);
         let name = self.name().map_or(0, |t| t.size() + 1);
         let trailing = self.trailing().size();
         let remains = leading + ty + name + trailing;
@@ -137,7 +136,6 @@ impl OffsetExt for KdlEntry {
             leading,
             name,
             ty,
-            // TODO: this seems hacky, workaround of kdl can have no value_repr.
             value: self
                 .value_repr()
                 .map_or(self.len() as u32 - remains, |t| t.size()),
@@ -157,8 +155,8 @@ impl<'a> SpannedEntry<'a> {
         Self { sizes, entry, offset }
     }
     pub(crate) fn name(&self) -> Option<Spanned<&'a str>> {
-        let EntrySizes { leading, ty, name, .. } = self.sizes;
-        let name_span = Span { offset: self.offset + leading + ty, size: name };
+        let EntrySizes { leading, name, .. } = self.sizes;
+        let name_span = Span { offset: self.offset + leading, size: name };
         self.entry.name().map(|n| Spanned(name_span, n.value()))
     }
     pub(crate) fn value(&self) -> Spanned<&'a KdlValue> {
@@ -170,9 +168,9 @@ impl<'a> SpannedEntry<'a> {
         Spanned(value_span, self.entry.value())
     }
     pub(crate) fn ty(&self) -> Option<Spanned<&'a str>> {
-        // TODO: hopefully this gets merged
-        // https://github.com/kdl-org/kdl-rs/pull/43
-        None
+        let EntrySizes { leading, name, ty, .. } = self.sizes;
+        let ty_span = Span { offset: self.offset + leading + name, size: ty };
+        self.entry.ty().map(|t| Spanned(ty_span, t.value()))
     }
     pub(crate) fn span(&self) -> Span {
         Span { offset: self.offset, size: self.entry.size() }

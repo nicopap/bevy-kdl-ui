@@ -5,7 +5,7 @@ use std::{
 
 use kdl::KdlDocument;
 
-use bevy_reflect::{Reflect, TypeInfo, TypeRegistry};
+use bevy_reflect::{TypeInfo, TypeRegistry};
 use kdl::KdlValue;
 use template_kdl::{
     multi_err::{MultiError, MultiErrorTrait, MultiResult},
@@ -14,7 +14,7 @@ use template_kdl::{
 };
 
 use crate::{
-    dyn_wrappers::{new_dynamic_anonstruct, type_info, Infos},
+    dyn_wrappers::{new_dynamic_anonstruct, type_info, AnonTupleInfo, Infos},
     err::{ConvertError, ConvertError::GenericUnsupported as TODO, ConvertErrors},
     ConvertResult, DynRefl,
 };
@@ -176,29 +176,36 @@ impl<'s> fmt::Display for ValueExt<'s> {
     }
 }
 impl<'s> ValueExt<'s> {
+    fn span(&self) -> Span {
+        match self {
+            Self::Node(node) => node.span(),
+            Self::Value(value) => value.0,
+        }
+    }
     pub(crate) fn into_dyn<'a>(
         &self,
-        expected: &'a TypeInfo,
+        expected: Option<&'a TypeInfo>,
         reg: &'a TypeRegistry,
     ) -> MultiResult<DynRefl, Spanned<ConvertError>> {
         use TypeInfo::{List, Map, Struct, Tuple, TupleStruct, Value};
         use ValueExt::Node;
         match (self, expected) {
-            (Node(node), Map(v)) => v.new_dynamic(node, reg),
-            (Node(node), List(v)) => v.new_dynamic(node, reg),
-            (Node(node), Tuple(v)) => v.new_dynamic(node, reg),
-            (Node(node), Value(v)) => v.new_dynamic(node, reg),
-            (Node(node), Struct(v)) if !node.is_anon() => v.new_dynamic(node, reg),
-            (Node(node), Struct(v)) => new_dynamic_anonstruct(v, node, reg),
-            (Node(node), TupleStruct(v)) => v.new_dynamic(node, reg),
-            (Node(node), v) => MultiResult::Err(vec![Spanned(
-                node.span(),
-                TODO(format!("cannot turn node into type: {node:?} and {v:?}")),
-            )]),
-            (ValueExt::Value(value), expected) => KdlConcrete::from(value.1.clone())
+            (Node(node), None) => AnonTupleInfo.new_dynamic(node, reg),
+            (Node(node), Some(Map(v))) => v.new_dynamic(node, reg),
+            (Node(node), Some(List(v))) => v.new_dynamic(node, reg),
+            (Node(node), Some(Tuple(v))) => v.new_dynamic(node, reg),
+            (Node(node), Some(Value(v))) => v.new_dynamic(node, reg),
+            (Node(node), Some(Struct(v))) if !node.is_anon() => v.new_dynamic(node, reg),
+            (Node(node), Some(Struct(v))) => new_dynamic_anonstruct(v, node, reg),
+            (Node(node), Some(TupleStruct(v))) => v.new_dynamic(node, reg),
+            (ValueExt::Value(value), Some(expected)) => KdlConcrete::from(value.1.clone())
                 .into_dyn(expected)
                 .map_err(|e| Spanned(value.0, e))
                 .into(),
+            (value, info) => MultiResult::Err(vec![Spanned(
+                value.span(),
+                TODO(format!("cannot turn node into type: {value:?} \n {info:?}")),
+            )]),
         }
     }
 }

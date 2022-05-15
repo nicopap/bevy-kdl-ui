@@ -386,11 +386,37 @@ Tuples work like conventional struct, appart that the node name is always `Tuple
 and the field declaration is always sequential.
 ```rust
 type MyTuple = (u8, SimpleFields, String);
+struct ContainsMyTuple(MyTuple);
 ```
 ```kdl, 13
+ContainsMyTuple {
+  Tuple 25 {
+    - first_field=34 second_field="Hello World"
+    - "Tuple String"
+  }
+}
+```
+
+`Tuple` delcarations have limitations: either one of the following must hold
+for `Tuple` to be used:
+* The type must be known from the context, for example when `Tuple` is a field
+  of something (note that in this case, you'll usually elide the `Tuple` and
+  use the field name instead)
+* The type of all fields must be explicitly declared
+
+```kdl, 28
+// WARNING: ERROR because there is no way to tell the type
+// of the fields.
 Tuple 25 {
   - first_field=34 second_field="Hello World"
   - "Tuple String"
+}
+```
+
+```kdl, 29
+Tuple (u8)25 {
+  SimpleFields first_field=34 second_field="Hello World"
+  String "Tuple String"
 }
 ```
 
