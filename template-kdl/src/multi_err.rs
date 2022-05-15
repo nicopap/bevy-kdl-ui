@@ -94,6 +94,7 @@ pub trait MultiErrorTrait {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum MultiResult<T, E> {
     Ok(T),
     OkErr(T, Vec<E>),

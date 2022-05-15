@@ -2,7 +2,7 @@ use std::any::{type_name, Any};
 use std::fmt;
 
 use bevy_reflect::{FromReflect, Reflect, TypeRegistration, TypeRegistry};
-use bevy_reflect_deser::{convert_doc, ConvertErrors};
+use bevy_reflect_deser::{convert_doc, from_doc, ConvertErrors};
 use bevy_utils::HashMap;
 use miette::GraphicalReportHandler;
 
@@ -70,14 +70,33 @@ struct KdlSection {
     content: &'static str,
     section: u32,
 }
+/// Reads all fenced kdl code with a number from the README of this crate.
 fn extract_kdls() -> impl Iterator<Item = KdlSection> {
     README.split("\n```").filter_map(|section| {
         let first_line = section.lines().next()?;
-        let first_line_len = first_line.len();
-        let kdl_num: u32 = first_line.get(5..).and_then(|s| s.parse().ok())?;
+        let first_line_len = first_line.len() + 1;
         let content = section.get(first_line_len..)?;
-        Some(KdlSection { section: kdl_num, content })
+        let kdl_num = first_line.get(5..).and_then(|s| s.parse().ok())?;
+        first_line
+            .starts_with("kdl, ")
+            .then(|| KdlSection { section: kdl_num, content })
     })
+}
+
+fn assert_all_lines_eq_kdl<T: FromReflect + PartialEq + fmt::Debug + Any>(
+    section_no: u32,
+    text: &str,
+    value: &T,
+    reg: &TypeRegistry,
+) -> Result<(), ConvertErrors> {
+    println!("in section {section_no}");
+    for (i, line) in text.lines().enumerate() {
+        println!("line {i}");
+        let converted = from_doc::<T>(&line.parse().unwrap(), &reg)
+            .map(|val| T::from_reflect(val.as_ref()).unwrap())?;
+        assert_eq!(&converted, value, "in {line}");
+    }
+    Ok(())
 }
 
 fn assert_eq_kdl<T: FromReflect + PartialEq + fmt::Debug>(
@@ -99,7 +118,7 @@ fn assert_fails_kdl<T: FromReflect + fmt::Debug + Any>(
 ) -> Result<(), ConvertErrors> {
     println!("in section {section_no}");
     let converted =
-        convert_doc(&text.parse().unwrap(), &reg).map(|val| T::from_reflect(val.as_ref()).unwrap());
+        convert_doc(&text.parse().unwrap(), &reg).map(|val| T::from_reflect(val.as_ref()));
 
     assert!(
         converted.is_err(),
@@ -159,12 +178,11 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
         NamedNewtype { inner: 2345 },
         Newtype(3456),
     );
-    let s3 = VecNewtype(string_vec!["one", "two", "three", "four", "five"]);
+    let s3_26 = VecNewtype(string_vec!["one", "two", "three", "four", "five"]);
     let s4_5_7 = SimpleFields {
         second_field: "Hello World".to_owned(),
         first_field: 34,
     };
-    // TODO: 7
     let s8 = NamedNewtype { inner: 9999 };
     let s9_10_11 = CompoundFields {
         first: string_vec!["hello", "world"],
@@ -176,7 +194,6 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
         second_field: "Hello World".to_owned(),
     };
     let s13 = (25, s4_5_7.clone(), "Tuple String".to_owned());
-    // TODO 14
     let s15 = Fancy("Hello".to_owned(), 9302);
     let s16 = vec![1usize, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     let s17_18 = map! {"one" => 1u32, "two" => 2, "three" => 3, "four" => 4, "five" => 5};
@@ -195,10 +212,11 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
         "four" => simple(4, "Cardinal directions"),
     };
     let s21 = vec![1u8, 2, 3, 4];
+    let s27 = NamedNestedNewtype { inner: Newtype(9999) };
 
     assert_eq_kdl(1, sections[0].content, &s1, &reg)?;
     assert_eq_kdl(2, sections[1].content, &s2, &reg)?;
-    assert_eq_kdl(3, sections[2].content, &s3, &reg)?;
+    assert_eq_kdl(3, sections[2].content, &s3_26, &reg)?;
     assert_eq_kdl(4, sections[3].content, &s4_5_7, &reg)?;
     assert_eq_kdl(5, sections[4].content, &s4_5_7, &reg)?;
     assert_fails_kdl::<SimpleFields>(6, sections[5].content, &reg)?;
@@ -221,5 +239,7 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
     assert_fails_kdl::<NamedNewtype>(23, sections[22].content, &reg)?;
     assert_fails_kdl::<SimpleFields>(24, sections[23].content, &reg)?;
     assert_fails_kdl::<NamedNewtype>(25, sections[24].content, &reg)?;
+    assert_eq_kdl(26, sections[25].content, &s3_26, &reg)?;
+    assert_all_lines_eq_kdl(27, sections[26].content, &s27, &reg)?;
     Ok(())
 }

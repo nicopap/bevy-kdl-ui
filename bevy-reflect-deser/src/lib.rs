@@ -10,7 +10,7 @@ mod newtype;
 mod visit;
 
 pub use err::{ConvertError, ConvertErrors, ConvertResult};
-pub use visit::convert_doc;
+pub use visit::{convert_doc, from_doc};
 
 pub type DynRefl = Box<dyn Reflect>;
 

@@ -118,7 +118,7 @@ impl ConvertError {
             UnnamedMapField { .. } => Some("Add a key to the values.".to_owned()),
             BadComponentTypeName => Some("You are declaring a field type, but only components are expected here.".to_owned()),
 
-            NoStaticallyDeducedType => None,
+            UntypedTupleField => None,
             MultipleSameField { .. } => Some("Remove one of the fields".to_owned()),
             TooManyTupleFields { .. } => Some("Remove the extraneous one".to_owned()),
             TooManyTupleStructFields { .. } => Some("Remove the extraneous one".to_owned()),

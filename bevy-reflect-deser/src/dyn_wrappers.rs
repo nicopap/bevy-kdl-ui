@@ -81,12 +81,9 @@ pub(crate) fn type_info<'r>(
 ) -> MultiResult<ExpectedType<'r>, ConvertError> {
     let mut errors = MultiError::default();
     let declared = declared.and_then(|name| errors.optionally(get_named(name, reg)));
-    let get_from_reg = |e: &TypeIdentity| {
-        errors.optionally(
-            reg.get(e.type_id())
-                .ok_or_else(|| ConvertError::NoSuchType(e.type_name().to_owned())),
-        )
-    };
+    let no_such = |e: &TypeIdentity| ConvertError::NoSuchType(e.type_name().to_owned());
+    let get_from_reg =
+        |e: &TypeIdentity| errors.optionally(reg.get(e.type_id()).ok_or_else(|| no_such(e)));
     match (declared, expected.and_then(get_from_reg)) {
         // Both declared and expected are registered, but they are not equal
         // We chose `declared` since that's what is in the file, so we expect that
@@ -406,7 +403,7 @@ where
         let expected = errors.optionally(expected.map_err(|e| Spanned(ty_span, e)));
         let try_ty = type_info(reg, opt_ty.map(|t| t.1), expected).map_err_span(ty_span);
         let ty = multi_try!(errors, try_ty);
-        let value = multi_try!(errors, ty.into_dyn(field.value, reg));
+        let value = multi_try!(errors, ty.into_dyn(field, reg));
         if let Err(err) = self.acc.add_boxed((), value) {
             errors.add_error(Spanned(ty_span, err));
         }
@@ -441,7 +438,7 @@ where
             let ty_span = opt_ty.map_or(name.0, |t| t.0);
             let try_ty = type_info(reg, opt_ty.map(|t| t.1), expected).map_err_span(ty_span);
             let ty = multi_try!(errors, try_ty);
-            let value = multi_try!(errors, ty.into_dyn(field.value, reg));
+            let value = multi_try!(errors, ty.into_dyn(field, reg));
             if let Err(err) = self.acc.add_boxed(name.1.to_owned(), value) {
                 errors.add_error(Spanned(ty_span, err));
             }

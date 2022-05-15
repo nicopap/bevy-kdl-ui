@@ -1,9 +1,11 @@
-use std::any;
-use std::{any::TypeId, fmt};
+use std::{
+    any::{self, Any, TypeId},
+    fmt,
+};
 
 use kdl::KdlDocument;
 
-use bevy_reflect::{TypeInfo, TypeRegistry};
+use bevy_reflect::{Reflect, TypeInfo, TypeRegistry};
 use kdl::KdlValue;
 use template_kdl::{
     multi_err::{MultiError, MultiErrorTrait, MultiResult},
@@ -14,7 +16,6 @@ use template_kdl::{
 use crate::{
     dyn_wrappers::{new_dynamic_anonstruct, type_info, Infos},
     err::{ConvertError, ConvertError::GenericUnsupported as TODO, ConvertErrors},
-    newtype::ExpectedType,
     ConvertResult, DynRefl,
 };
 
@@ -23,12 +24,28 @@ pub fn convert_doc(doc: &KdlDocument, registry: &TypeRegistry) -> ConvertResult<
     let doc_repr = doc.to_string();
     let template_map = |err: Spanned<_>| err.map(ConvertError::Template);
     if let Some(doc) = errors.optionally(template_kdl::read_document(doc).map_err(template_map)) {
-        let Spanned(name_span, name) = doc.name();
+        let Spanned(name_span, name) = doc.ty().unwrap_or_else(|| doc.name());
         let expected = type_info(registry, Some(name), None).map_err_span(name_span);
-        let node = ValueExt::Node(NodeThunkExt(doc));
         expected
             .combine(errors)
-            .and_then(|e| e.into_dyn(node, registry))
+            .and_then(|e| e.into_dyn(doc.into(), registry))
+            .into_result()
+            .map_err(|e| ConvertErrors::new(doc_repr, e))
+    } else {
+        Err(ConvertErrors::new(doc_repr, errors.errors().to_vec()))
+    }
+}
+pub fn from_doc<T: Any>(doc: &KdlDocument, registry: &TypeRegistry) -> ConvertResult<DynRefl> {
+    let mut errors = MultiError::default();
+    let doc_repr = doc.to_string();
+    let template_map = |err: Spanned<_>| err.map(ConvertError::Template);
+    if let Some(doc) = errors.optionally(template_kdl::read_document(doc).map_err(template_map)) {
+        let expected = registry.get_type_info(TypeId::of::<T>()).map(|r| r.id());
+        let Spanned(name_span, _) = doc.ty().unwrap_or_else(|| doc.name());
+        let expected = type_info(registry, None, expected).map_err_span(name_span);
+        expected
+            .combine(errors)
+            .and_then(|e| e.into_dyn(doc.into(), registry))
             .into_result()
             .map_err(|e| ConvertErrors::new(doc_repr, e))
     } else {
@@ -144,20 +161,41 @@ impl KdlConcrete {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum ValueExt<'s> {
     Node(NodeThunkExt<'s>),
     // TODO: the Value alt should encode expected type
     Value(Spanned<&'s KdlValue>),
 }
+impl<'s> fmt::Display for ValueExt<'s> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Node(node) => write!(f, "{node}"),
+            Self::Value(Spanned(_, value)) => write!(f, "{value}"),
+        }
+    }
+}
 impl<'s> ValueExt<'s> {
     pub(crate) fn into_dyn<'a>(
-        self,
+        &self,
         expected: &'a TypeInfo,
         reg: &'a TypeRegistry,
     ) -> MultiResult<DynRefl, Spanned<ConvertError>> {
-        match self {
-            ValueExt::Node(node) => node.into_dyn(expected, reg),
-            ValueExt::Value(value) => KdlConcrete::from(value.1.clone())
+        use TypeInfo::{List, Map, Struct, Tuple, TupleStruct, Value};
+        use ValueExt::Node;
+        match (self, expected) {
+            (Node(node), Map(v)) => v.new_dynamic(node, reg),
+            (Node(node), List(v)) => v.new_dynamic(node, reg),
+            (Node(node), Tuple(v)) => v.new_dynamic(node, reg),
+            (Node(node), Value(v)) => v.new_dynamic(node, reg),
+            (Node(node), Struct(v)) if !node.is_anon() => v.new_dynamic(node, reg),
+            (Node(node), Struct(v)) => new_dynamic_anonstruct(v, node, reg),
+            (Node(node), TupleStruct(v)) => v.new_dynamic(node, reg),
+            (Node(node), v) => MultiResult::Err(vec![Spanned(
+                node.span(),
+                TODO(format!("cannot turn node into type: {node:?} and {v:?}")),
+            )]),
+            (ValueExt::Value(value), expected) => KdlConcrete::from(value.1.clone())
                 .into_dyn(expected)
                 .map_err(|e| Spanned(value.0, e))
                 .into(),
@@ -208,11 +246,23 @@ impl<'s> From<NodeThunk<'s>> for FieldThunk<'s> {
 
 #[derive(Debug)]
 pub(crate) struct NodeThunkExt<'s>(NodeThunk<'s>);
+impl<'s> fmt::Display for NodeThunkExt<'s> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl<'s> NodeThunkExt<'s> {
     // TODO: actual error handling (eg: check there is not more than 1 etc.)
     pub(crate) fn first_argument(&self) -> Option<Spanned<&'s KdlValue>> {
-        self.0.entries().next().map(|e| e.value())
+        let mut entries = self.0.entries();
+        let first = entries.next();
+        let second = entries.next();
+        second
+            .is_none()
+            .then(|| first)
+            .flatten()
+            .and_then(|f| f.name().is_none().then(|| f.value()))
     }
     pub(crate) fn fields(&self) -> impl Iterator<Item = FieldThunk<'s>> {
         let entries = self.0.entries().map(Into::into);
@@ -224,25 +274,5 @@ impl<'s> NodeThunkExt<'s> {
     }
     fn is_anon(&self) -> bool {
         self.fields().next().map_or(false, |e| e.name.is_none())
-    }
-    fn into_dyn(
-        &self,
-        expected: &TypeInfo,
-        reg: &TypeRegistry,
-    ) -> MultiResult<DynRefl, Spanned<ConvertError>> {
-        use TypeInfo::{List, Map, Struct, Tuple, TupleStruct, Value};
-        match expected {
-            Map(v) => v.new_dynamic(self, reg),
-            List(v) => v.new_dynamic(self, reg),
-            Tuple(v) => v.new_dynamic(self, reg),
-            Value(v) => v.new_dynamic(self, reg),
-            Struct(v) if self.is_anon() => new_dynamic_anonstruct(v, self, reg),
-            Struct(v) => v.new_dynamic(self, reg),
-            TupleStruct(v) => v.new_dynamic(self, reg),
-            v => MultiResult::Err(vec![Spanned(
-                self.span(),
-                TODO(format!("cannot turn node into type: {self:?} and {v:?}")),
-            )]),
-        }
     }
 }

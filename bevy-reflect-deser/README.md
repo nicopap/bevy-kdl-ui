@@ -200,7 +200,23 @@ struct VecNewtype(Vec<String>);
 ```
 
 ```kdl, 3
+VecNewtype { - "one" "two" "three" "four" "five"; }
+```
+```kdl, 26
 VecNewtype "one" "two" "three" "four" "five"
+```
+
+In short, all the following declarations are equivalent:
+```kdl, 27
+NamedNestedNewtype inner=9999
+NamedNestedNewtype 9999
+(NamedNestedNewtype)Newtype 9999
+(NamedNestedNewtype)Newtype inner=9999
+(NamedNestedNewtype)- 9999
+NamedNestedNewtype inner=(Newtype)9999
+- 9999
+Newtype 9999
+Newtype inner=9999
 ```
 
 
@@ -246,6 +262,10 @@ Otherwise a type mistmach error will be raised.
 SimpleFields "Hello World" 34
 // It will cause a "TypeMismatch" error
 ```
+
+**Warning**: you cannot use the "field name for type name" feature with the
+unnamed declaration for structs, since the presence of a name implies a
+name-based declaration scheme.
 
 It is also possible to represent the fields as *children nodes*. The *child
 node* *name* will be the field name, while its first argument will be the 
