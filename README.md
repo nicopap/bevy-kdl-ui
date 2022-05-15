@@ -55,11 +55,11 @@ See the relevant sections in the respective crate READMEs.
         to use multiple files
 - [X] Resolve the "variable scopping" problem.
 - [X] Document `fns` (mostly copy the section on top here)
-- [ ] `deser`: Implement all documented features that are currently commented-out in
+- [X] `deser`: Implement all documented features that are currently commented-out in
       integration tests.
   - [X] Anonymous tuples
   - [X] Struct with named field but not named in kdl file
-  - [ ] Hashmap tuple form
+  - [X] Hashmap tuple form
 - [ ] Deduplicate similar errors
 - [ ] Add context to field errors (encompassing struct, alternative possible names etc.)
 - [X] FIX error message for too many fields in tupleStruct

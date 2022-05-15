@@ -51,6 +51,13 @@ pub(crate) fn new_dynamic_anonstruct(
 ) -> MultiSpan<DynRefl> {
     Wrapper::<(), _, AnonDynamicStruct>::new_dynamic(info, node, reg)
 }
+pub(crate) fn new_pairmap(
+    info: &MapInfo,
+    node: &NodeThunkExt,
+    reg: &TypeRegistry,
+) -> MultiSpan<DynRefl> {
+    PairMapBuilder::new_dynamic(info, node, reg)
+}
 impl_infos! {MapInfo, String, DynamicMap}
 impl_infos! {StructInfo, String, DynamicStruct}
 impl_infos! {ListInfo, (), DynamicList}
@@ -128,7 +135,41 @@ pub(crate) trait Primitive {
     fn validate(&self, info: &Self::Info) -> ConvResult<()>;
     fn reflect(self) -> Box<dyn Reflect>;
 }
+pub(crate) struct PairMapBuilder(DynamicMap, MapInfo);
 
+impl Builder for PairMapBuilder {
+    type Info = MapInfo;
+
+    fn new(expected: &Self::Info) -> Self {
+        Self(DynamicMap::default(), expected.clone())
+    }
+
+    fn add_field(&mut self, field: FieldThunk, reg: &TypeRegistry) -> MultiSpan<()> {
+        let mut errors = MultiError::default();
+        if let Some((key, value)) = field.pair() {
+            let span = field.span();
+            let key_expected = multi_try!(
+                errors,
+                type_info(reg, None, Some(self.1.key())).map_err_span(span)
+            );
+            let value_expected = multi_try!(
+                errors,
+                type_info(reg, None, Some(self.1.value())).map_err_span(span)
+            );
+            let key = multi_try!(errors, key_expected.into_dyn(key.into(), reg));
+            let value = multi_try!(errors, value_expected.into_dyn(value.into(), reg));
+            self.0.insert_boxed(key, value);
+            errors.into_result(())
+        } else {
+            let err = Spanned(field.span(), ConvertError::TupleMapDeclarationMixup);
+            errors.into_errors(err)
+        }
+    }
+
+    fn complete(self) -> MultiResult<DynRefl, ConvertError> {
+        MultiResult::Ok(Box::new(self.0))
+    }
+}
 impl Primitive for DynamicMap {
     type Field = String;
     type Info = MapInfo;

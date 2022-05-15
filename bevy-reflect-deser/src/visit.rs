@@ -14,7 +14,7 @@ use template_kdl::{
 };
 
 use crate::{
-    dyn_wrappers::{new_dynamic_anonstruct, type_info, AnonTupleInfo, Infos},
+    dyn_wrappers::{new_dynamic_anonstruct, new_pairmap, type_info, AnonTupleInfo, Infos},
     err::{ConvertError, ConvertError::GenericUnsupported as TODO, ConvertErrors},
     ConvertResult, DynRefl,
 };
@@ -191,6 +191,7 @@ impl<'s> ValueExt<'s> {
         use ValueExt::Node;
         match (self, expected) {
             (Node(node), None) => AnonTupleInfo.new_dynamic(node, reg),
+            (Node(node), Some(Map(v))) if node.is_anon() => new_pairmap(v, node, reg),
             (Node(node), Some(Map(v))) => v.new_dynamic(node, reg),
             (Node(node), Some(List(v))) => v.new_dynamic(node, reg),
             (Node(node), Some(Tuple(v))) => v.new_dynamic(node, reg),
@@ -229,6 +230,17 @@ impl<'s> FieldThunk<'s> {
     }
     pub(crate) fn span(&self) -> Span {
         self.span
+    }
+    pub(crate) fn pair(&self) -> Option<(FieldThunk<'s>, FieldThunk<'s>)> {
+        match &self.value {
+            ValueExt::Value(_) => None,
+            ValueExt::Node(n) => {
+                let mut fields = n.fields();
+                let n1 = fields.next()?;
+                let n2 = fields.next()?;
+                Some((n1, n2))
+            }
+        }
     }
 }
 

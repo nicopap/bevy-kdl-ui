@@ -14,6 +14,14 @@ macro_rules! string_vec {
 macro_rules! map {
     ($($key:expr => $value:expr),*$(,)?) => ({
         let mut ret = HashMap::default();
+        $(ret.insert($key, $value);)*
+        ret
+    })
+}
+
+macro_rules! map_string {
+    ($($key:expr => $value:expr),*$(,)?) => ({
+        let mut ret = HashMap::default();
         $(ret.insert($key.to_owned(), $value);)*
         ret
     })
@@ -66,6 +74,9 @@ struct ContainsMyTuple(MyTuple);
 #[derive(Reflect, Debug, FromReflect, PartialEq)]
 struct Fancy(String, u32);
 
+#[derive(Reflect, Debug, FromReflect, PartialEq)]
+struct StringNewtype(String);
+
 const README: &'static str = include_str!("../README.md");
 
 struct KdlSection {
@@ -109,18 +120,6 @@ fn assert_eq_kdl<T: FromReflect + PartialEq + fmt::Debug>(
 ) -> Result<(), ConvertErrors> {
     println!("in section {section_no}");
     let converted = convert_doc(&text.parse().unwrap(), &reg)
-        .map(|val| T::from_reflect(val.as_ref()).unwrap())?;
-    assert_eq!(&converted, value, "in {text}");
-    Ok(())
-}
-fn assert_eq_kdl_expecting<T: Any + FromReflect + PartialEq + fmt::Debug>(
-    section_no: u32,
-    text: &str,
-    value: &T,
-    reg: &TypeRegistry,
-) -> Result<(), ConvertErrors> {
-    println!("in section {section_no}");
-    let converted = from_doc::<T>(&text.parse().unwrap(), &reg)
         .map(|val| T::from_reflect(val.as_ref()).unwrap())?;
     assert_eq!(&converted, value, "in {text}");
     Ok(())
@@ -170,12 +169,13 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
     register_all!(
         Coord, Foo, Newtype, NamedNewtype, NamedNestedNewtype, VecNewtype, SimpleFields,
         CompoundFields, NewtypeField, Fancy, u8, u32, usize, String, u64, f64,
-        ContainsMyTuple,
+        ContainsMyTuple, StringNewtype
     );
     #[rustfmt::skip]
     register_more!(
         MyTuple, Example2, (u64, u32, u32), Vec<String>, Vec<u8>, Vec<Fancy>,
-        HashMap<String, SimpleFields>, HashMap<String, u32>, Vec<usize>
+        HashMap<String, SimpleFields>, HashMap<String, u32>, Vec<usize>,
+        HashMap<u32, Fancy>, HashMap<u32, StringNewtype>
     );
 
     let mut sections: Vec<_> = extract_kdls().collect();
@@ -211,7 +211,14 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
     let s13_29 = ContainsMyTuple((25, s4_5_7.clone(), "Tuple String".to_owned()));
     let s15 = Fancy("Hello".to_owned(), 9302);
     let s16 = vec![1usize, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    let s17_18 = map! {"one" => 1u32, "two" => 2, "three" => 3, "four" => 4, "five" => 5};
+    let s17 = map_string! {"one" => 1u32, "two" => 2, "three" => 3, "four" => 4, "five" => 5};
+    let fancy = |s: &str, i| Fancy(s.to_owned(), i);
+    let s18: HashMap<u32, Fancy> = map! {
+        1 => fancy("Hello world", 1),
+        2 => fancy("Bonjour le monde", 2),
+        3 => fancy("Hallo Welt", 3),
+        4 => fancy("Ahoj svĕte", 4),
+    };
     let s19 = vec![
         Fancy("One thousand".to_owned(), 1000),
         Fancy("Two thousand".to_owned(), 2000),
@@ -220,7 +227,7 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
     ];
     let simple =
         |value, what: &str| SimpleFields { second_field: what.to_owned(), first_field: value };
-    let s20 = map! {
+    let s20 = map_string! {
         "ten" => simple(10, "Commandments"),
         "seven" => simple(7, "Dwarves"),
         "five" => simple(5, "Fingers"),
@@ -228,6 +235,12 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
     };
     let s21 = vec![1u8, 2, 3, 4];
     let s27 = NamedNestedNewtype { inner: Newtype(9999) };
+    let s30: HashMap<u32, _> = map! {
+        1 => StringNewtype("Hello world".to_owned()),
+        2 => StringNewtype("Bonjour le monde".to_owned()),
+        3 => StringNewtype("Hallo Welt".to_owned()),
+        4 => StringNewtype("Ahoj svĕte".to_owned()),
+    };
 
     assert_eq_kdl(1, sections[0].content, &s1, &reg)?;
     assert_eq_kdl(2, sections[1].content, &s2, &reg)?;
@@ -245,8 +258,8 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
     assert_fails_kdl::<MyTuple>(14, sections[13].content, &reg)?;
     assert_eq_kdl(15, sections[14].content, &s15, &reg)?;
     assert_eq_kdl(16, sections[15].content, &s16, &reg)?;
-    assert_eq_kdl(17, sections[16].content, &s17_18, &reg)?;
-    // assert_eq_kdl(18, sections[17].content, &s17_18, &reg)?;
+    assert_eq_kdl(17, sections[16].content, &s17, &reg)?;
+    assert_eq_kdl(18, sections[17].content, &s18, &reg)?;
     assert_eq_kdl(19, sections[18].content, &s19, &reg)?;
     assert_eq_kdl(20, sections[19].content, &s20, &reg)?;
     assert_eq_kdl(21, sections[20].content, &s21, &reg)?;
@@ -258,5 +271,6 @@ fn readme_examples_inner() -> Result<(), ConvertErrors> {
     assert_all_lines_eq_kdl(27, sections[26].content, &s27, &reg)?;
     assert_fails_kdl::<MyTuple>(28, sections[27].content, &reg)?;
     assert_eq_kdl(29, sections[28].content, &s13_29.0, &reg)?;
+    assert_eq_kdl(30, sections[29].content, &s30, &reg)?;
     Ok(())
 }

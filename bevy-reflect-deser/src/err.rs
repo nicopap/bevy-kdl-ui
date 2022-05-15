@@ -77,14 +77,10 @@ pub enum ConvertError {
     NamedListDeclaration(String),
     #[error("{name} requires all its field to be named, but one of them wasn't.")]
     UnnamedMapField { name: String },
+    #[error("The declaration of this Map started in tuple style, but this field has a name.")]
+    TupleMapDeclarationMixup,
     #[error("Field at component declaration site.")]
     BadComponentTypeName,
-    // #[error("As {newtype} unwrapped into {inner}: {err}")]
-    // NewtypeInner {
-    //     newtype: String,
-    //     inner: String,
-    //     err: Box<ConvertError>,
-    // },
 }
 impl ConvertError {
     #[cfg(feature = "fancy-errors")]
@@ -119,6 +115,7 @@ impl ConvertError {
             BadComponentTypeName => Some("You are declaring a field type, but only components are expected here.".to_owned()),
 
             UntypedTupleField => None,
+            TupleMapDeclarationMixup => None,
             MultipleSameField { .. } => Some("Remove one of the fields".to_owned()),
             TooManyTupleFields { .. } => Some("Remove the extraneous one".to_owned()),
             TooManyTupleStructFields { .. } => Some("Remove the extraneous one".to_owned()),

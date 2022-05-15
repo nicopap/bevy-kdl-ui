@@ -469,18 +469,42 @@ To have a key that is not a `String` type or a string that doesn't comply
 with the Kdl identifier rules you can use the special form:
 
 ```kdl, 18
-"HashMap<String, u32>" {
-  - "one" 1
-  - "one many" 2 
-  - "one many and one" 3 
-  - "one bunch" 4 
-  - "one bunch and one" 5
-  - "one bunch one many" 6
-  - "one bunch one many and one" 7
+"HashMap<u32, Fancy>" {
+  - {
+    u32 1
+    Fancy "Hello world" 1
+  }
+  - {
+    u32 2
+    Fancy "Bonjour le monde" 2
+  }
+  - {
+    u32 3
+    Fancy "Hallo Welt" 3
+  }
+  - {
+    u32 4
+    Fancy "Ahoj svĕte" 4
+  }
 }
 ```
 
-You basically declare a list of tuple `(Key, Value)`.
+You basically declare a list of tuple `(Key, Value)`. This also implies that
+if both sides of the tuple are representable as values, you can use a shorter
+syntax:
+
+```kdl, 30
+"HashMap<u32, StringNewtype>" {
+  - 1 "Hello world" 
+  - 2 "Bonjour le monde" 
+  - 3 "Hallo Welt" 
+  - 4 "Ahoj svĕte" 
+}
+```
+
+**WARNING**: Currently, `bevy-reflect-deser` doesn't support compound types in
+the `value` position of maps, due to limitations on how hashes are extrapolated
+for `Dynamic*`.
 
 
 #### Compound types
