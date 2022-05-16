@@ -4,6 +4,8 @@ use kdl::KdlValue;
 pub enum Error {
     #[error("Template parameters should have an explicit name, instead got {0:?}")]
     NonstringParam(KdlValue),
+    #[error("Template node parameters should have a unique child node")]
+    BadTemplateNodeParam,
     #[error("Template has no body")]
     NoBody,
     #[error("The input is not properly formatted KDL: {0}")]

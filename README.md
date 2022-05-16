@@ -73,7 +73,7 @@ See the relevant sections in the respective crate READMEs.
 - [X] Expand `fn` nodes in other nodes
 - [ ] `deser`: do not store type names as string, rather just the TypeId. And
       get back the string when building the final `ConvResults`
-- [ ] Actually use invocation arguments in `fn` expension
+- [X] Actually use invocation arguments in `fn` expension
 - [ ] `expand` meta-node
 - [ ] add a `bundle` node so that it's possible to define multiple
       components at a time
@@ -86,7 +86,7 @@ See the relevant sections in the respective crate READMEs.
 - [ ] ?? Consider having a generic template parser rather than one that depends on Kdl
       it would just wrap another Deserializer. => Check [design decision]
 - [X] Fix broken links in READMEs
-- [ ] Spaces and non-string map keys
+- [X] Spaces and non-string map keys
 - [ ] Add "kdl markers" to nodes spawned, so that it might be eventually
       possible to round-trip the world, for 
 - [ ] Read and add to assets the last node in the kdl file

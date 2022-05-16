@@ -154,10 +154,10 @@ impl<'a> SpannedEntry<'a> {
         let sizes = entry.sizes();
         Self { sizes, entry, offset }
     }
-    pub(crate) fn name(&self) -> Option<Spanned<&'a str>> {
+    pub(crate) fn name(&self) -> Option<Spanned<&'a KdlIdentifier>> {
         let EntrySizes { leading, name, .. } = self.sizes;
         let name_span = Span { offset: self.offset + leading, size: name };
-        self.entry.name().map(|n| Spanned(name_span, n.value()))
+        self.entry.name().map(|n| Spanned(name_span, n))
     }
     pub(crate) fn value(&self) -> Spanned<&'a KdlValue> {
         let EntrySizes { leading, ty, name, value, .. } = self.sizes;
@@ -167,10 +167,10 @@ impl<'a> SpannedEntry<'a> {
         };
         Spanned(value_span, self.entry.value())
     }
-    pub(crate) fn ty(&self) -> Option<Spanned<&'a str>> {
+    pub(crate) fn ty(&self) -> Option<Spanned<&'a KdlIdentifier>> {
         let EntrySizes { leading, name, ty, .. } = self.sizes;
         let ty_span = Span { offset: self.offset + leading + name, size: ty };
-        self.entry.ty().map(|t| Spanned(ty_span, t.value()))
+        self.entry.ty().map(|t| Spanned(ty_span, t))
     }
     pub(crate) fn span(&self) -> Span {
         Span { offset: self.offset, size: self.entry.size() }
@@ -213,15 +213,15 @@ impl<'a> SpannedNode<'a> {
         let sizes = node.sizes();
         Self { sizes, node, offset }
     }
-    pub(crate) fn ty(&self) -> Option<Spanned<&'a str>> {
+    pub(crate) fn ty(&self) -> Option<Spanned<&'a KdlIdentifier>> {
         let offset = self.offset + self.sizes.leading + 1;
         let span = Span { offset, size: self.sizes.ty };
-        self.node.ty().map(|ty| Spanned(span, ty.value()))
+        self.node.ty().map(|ty| Spanned(span, ty))
     }
-    pub(crate) fn name(&self) -> Spanned<&'a str> {
+    pub(crate) fn name(&self) -> Spanned<&'a KdlIdentifier> {
         let NodeSizes { leading, ty, name, .. } = self.sizes;
         let name_span = Span { offset: self.offset + leading + ty, size: name };
-        let name = self.node.name().value();
+        let name = self.node.name();
         Spanned(name_span, name)
     }
     pub(crate) fn entries(&self) -> impl Iterator<Item = SpannedEntry<'a>> {

@@ -164,7 +164,6 @@ impl KdlConcrete {
 #[derive(Debug)]
 pub(crate) enum ValueExt<'s> {
     Node(NodeThunkExt<'s>),
-    // TODO: the Value alt should encode expected type
     Value(Spanned<&'s KdlValue>),
 }
 impl<'s> fmt::Display for ValueExt<'s> {

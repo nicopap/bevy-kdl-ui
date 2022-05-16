@@ -52,7 +52,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
+use kdl::{KdlDocument, KdlEntry, KdlIdentifier, KdlNode, KdlValue};
 
 use crate::err::Error;
 use crate::multi_err::{MultiError, MultiErrorTrait, MultiResult};
@@ -78,9 +78,19 @@ pub(crate) struct Tparameter<'s> {
 impl<'s> TryFrom<SpannedNode<'s>> for Tparameter<'s> {
     type Error = Spanned<Error>;
     fn try_from(node: SpannedNode<'s>) -> Result<Self, Self::Error> {
-        // TODO: proper parsing of node parameters
-        let Spanned(_, name) = node.name();
-        Ok(Self { name, value: node.into() })
+        let Spanned(name_span, name) = node.name();
+        if let Some(children) = node.children() {
+            let node_count = children.node_count();
+            if node_count == 1 {
+                // unwrap: we just checked node_count == 1
+                let node = children.nodes().next().unwrap();
+                Ok(Self { name: name.value(), value: node.into() })
+            } else {
+                Err(Spanned(name_span, Error::BadTemplateNodeParam))
+            }
+        } else {
+            Err(Spanned(name_span, Error::BadTemplateNodeParam))
+        }
     }
 }
 impl<'s> TryFrom<SpannedEntry<'s>> for Tparameter<'s> {
@@ -91,7 +101,10 @@ impl<'s> TryFrom<SpannedEntry<'s>> for Tparameter<'s> {
                 Ok(Self { name, value: TdefaultArg::None })
             }
             (None, value_span) => Err(value_span.map_cloned(Error::NonstringParam)),
-            (Some(Spanned(_, name)), value) => Ok(Self { name, value: TdefaultArg::Value(value) }),
+            (Some(Spanned(_, name)), value) => Ok(Self {
+                name: name.value(),
+                value: TdefaultArg::Value(value),
+            }),
         }
     }
 }
@@ -105,6 +118,7 @@ impl<'s> Targuments<'s> {
         let key = key.as_string()?;
         self.values.get(key).cloned()
     }
+    // TODO: usages of this method are probably eroneous
     pub(crate) fn ident(&self, key: &str) -> Option<Spanned<&'s str>> {
         let Spanned(s, v) = self.values.get(key)?;
         v.as_string().map(|v| Spanned(*s, v))
@@ -119,6 +133,13 @@ pub(crate) struct Declaration<'s> {
     params: Vec<Tparameter<'s>>,
 }
 impl<'s> Declaration<'s> {
+    fn param_named(&self, name: &str) -> Option<&Tparameter<'s>> {
+        self.params.iter().find(|p| p.name == name)
+    }
+    fn param_at(&self, index: usize) -> Option<&Tparameter<'s>> {
+        let is_node = |p: &Tparameter| matches!(p.value, TdefaultArg::Node(_));
+        self.params.get(index)
+    }
     fn new(node: SpannedNode<'s>) -> MultiResult<Self, Spanned<Error>> {
         let mut errors = MultiError::default();
         let Spanned(name_span, _) = node.name();
@@ -139,12 +160,10 @@ impl<'s> Declaration<'s> {
     /// Transform tparameters into targuments as specified at `call` site.
     fn arguments(
         &self,
-        _call: NodeThunk<'s>,
+        call: NodeThunk<'s>,
         binding_index: u16,
         bindings: Rc<[Binding<'s>]>,
     ) -> Targuments<'s> {
-        // TODO: clean this up, maybe use RwStruct
-        // TODO FIXME: currently just transparently passes the default values
         let mut values = HashMap::default();
         let mut nodes = HashMap::default();
         for param in self.params.iter() {
@@ -161,6 +180,26 @@ impl<'s> Declaration<'s> {
                     values.insert(param.name, v);
                 }
                 TdefaultArg::None => {}
+            }
+        }
+        for (i, argument) in call.fields().enumerate() {
+            let FieldThunk { name, value, .. } = argument;
+            match value {
+                ValueExt::Value(argument) => {
+                    let param = if let Some(Spanned(_, name)) = name {
+                        self.param_named(name.value())
+                    } else {
+                        self.param_at(i)
+                    };
+                    if let Some(param) = param {
+                        values.insert(param.name, argument);
+                    }
+                }
+                ValueExt::Node(argument) => {
+                    if let Some(param) = self.param_at(i) {
+                        nodes.insert(param.name, argument);
+                    }
+                }
             }
         }
         Targuments { values, nodes }
@@ -180,7 +219,7 @@ impl<'s> Binding<'s> {
     pub(crate) fn new(index: u16, node: SpannedNode<'s>) -> (Binding, Vec<Spanned<Error>>) {
         let Spanned(_, name) = node.name();
         Declaration::new(node).unwrap_opt(|declaration| Self {
-            name,
+            name: name.value(),
             declaration,
             binding_index: index,
         })
@@ -190,27 +229,18 @@ impl<'s> Binding<'s> {
         invocation: NodeThunk<'s>,
         bindings: Rc<[Binding<'s>]>,
     ) -> Option<NodeThunk<'s>> {
-        if self.name == invocation.name().1 {
-            if let Some(declaration) = &self.declaration {
-                let arguments = Rc::new(declaration.arguments(
-                    invocation,
-                    self.binding_index,
-                    bindings.clone(),
-                ));
-                let context = Context {
-                    arguments,
-                    bindings,
-                    binding_index: self.binding_index,
-                };
-                Some(NodeThunk { context, body: declaration.body })
-            } else {
-                // TODO: ideally: keep the initial invocation if error, so that it's
-                // possible to diagnose errors even in it.
-                None
-            }
-        } else {
-            None
+        if self.name != invocation.name().1 {
+            return None;
         }
+        let declaration = self.declaration.as_ref()?;
+        let arguments =
+            Rc::new(declaration.arguments(invocation, self.binding_index, bindings.clone()));
+        let context = Context {
+            arguments,
+            bindings,
+            binding_index: self.binding_index,
+        };
+        Some(NodeThunk { context, body: declaration.body })
     }
 }
 
@@ -231,6 +261,12 @@ impl<'s> Context<'s> {
         }
     }
     pub(crate) fn expand(&self, invocation: NodeThunk<'s>) -> Option<NodeThunk<'s>> {
+        // argument expension before binding expension, because that's what makes sense
+        if invocation.fields().next().is_none() {
+            if let Some(expanded) = self.arguments.node(invocation.name().1).cloned() {
+                return Some(expanded);
+            }
+        }
         self.bindings[0..self.binding_index as usize]
             .iter()
             .rev()
@@ -247,13 +283,13 @@ impl<'s> EntryThunk<'s> {
         Self { body, context }
     }
     pub fn ty(&self) -> Option<Spanned<&'s str>> {
-        self.body.ty()
+        self.body.ty().map(|t| t.map(|t| t.value()))
     }
     pub fn span(&self) -> Span {
         self.body.span()
     }
     pub fn name(&self) -> Option<Spanned<&'s str>> {
-        self.body.name()
+        self.body.name().map(|t| t.map(|t| t.value()))
     }
     pub fn value(&self) -> Spanned<&'s KdlValue> {
         let Spanned(s, v) = self.body.value();
@@ -267,6 +303,65 @@ impl<'s> EntryThunk<'s> {
         }
     }
 }
+#[derive(Debug)]
+pub enum ValueExt<'s> {
+    Node(NodeThunk<'s>),
+    Value(Spanned<&'s KdlValue>),
+}
+impl<'s> fmt::Display for ValueExt<'s> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Node(node) => write!(f, "{node}"),
+            Self::Value(Spanned(_, value)) => write!(f, "{value}"),
+        }
+    }
+}
+impl<'s> ValueExt<'s> {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Node(node) => node.span(),
+            Self::Value(value) => value.0,
+        }
+    }
+}
+pub struct FieldThunk<'s> {
+    pub ty: Option<Spanned<&'s KdlIdentifier>>,
+    pub name: Option<Spanned<&'s KdlIdentifier>>,
+    pub value: ValueExt<'s>,
+    pub span: Span,
+}
+
+impl<'s> FieldThunk<'s> {
+    fn new(
+        declared_ty: Option<Spanned<&'s KdlIdentifier>>,
+        field_name: Option<Spanned<&'s KdlIdentifier>>,
+        value: ValueExt<'s>,
+        span: Span,
+    ) -> Self {
+        let field_name = field_name.filter(|name| name.1.value() != "-");
+        Self { ty: declared_ty, name: field_name, value, span }
+    }
+}
+
+impl<'s> From<EntryThunk<'s>> for FieldThunk<'s> {
+    fn from(entry: EntryThunk<'s>) -> Self {
+        let span = entry.span();
+        let value = ValueExt::Value(entry.value());
+        Self::new(entry.body.ty(), entry.body.name(), value, span)
+    }
+}
+impl<'s> From<NodeThunk<'s>> for FieldThunk<'s> {
+    fn from(node: NodeThunk<'s>) -> Self {
+        let span = node.span();
+        Self::new(
+            node.body.ty(),
+            Some(node.body.name()),
+            ValueExt::Node(node),
+            span,
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct NodeThunk<'s> {
     body: SpannedNode<'s>,
@@ -280,14 +375,14 @@ impl<'s> NodeThunk<'s> {
         self.body.span()
     }
     pub fn ty(&self) -> Option<Spanned<&'s str>> {
-        self.body.ty()
+        self.body.ty().map(|t| t.map(|t| t.value()))
     }
     pub fn name(&self) -> Spanned<&'s str> {
         let Spanned(span, name) = self.body.name();
         self.context
             .arguments
-            .ident(name)
-            .unwrap_or(Spanned(span, name))
+            .ident(name.value())
+            .unwrap_or(Spanned(span, name.value()))
     }
     pub fn entries(&self) -> impl Iterator<Item = EntryThunk<'s>> {
         let entries = self.body.entries();
@@ -308,12 +403,17 @@ impl<'s> NodeThunk<'s> {
             .flat_map(|d| d.nodes())
             .map(with_param_expanded)
     }
+    pub fn fields(&self) -> impl Iterator<Item = FieldThunk<'s>> {
+        let entries = self.entries().map(Into::into);
+        let children = self.children().map(Into::into);
+        entries.chain(children)
+    }
     pub fn evaluate(self) -> MultiResult<KdlNode, Spanned<Error>> {
         let mut errors = MultiError::default();
         let children: MultiResult<Vec<KdlNode>, _> =
             self.children().map(|n| n.evaluate()).collect();
         let entries: Vec<KdlEntry> = self.entries().map(|e| e.evaluate()).collect();
-        let mut node = KdlNode::new(self.body.name().1);
+        let mut node = KdlNode::new(self.body.name().1.clone());
         *node.entries_mut() = entries;
         let children = multi_try!(errors, children);
         if !children.is_empty() {
