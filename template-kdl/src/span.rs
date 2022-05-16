@@ -145,7 +145,7 @@ impl OffsetExt for KdlEntry {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SpannedEntry<'a> {
-    entry: &'a KdlEntry,
+    pub(crate) entry: &'a KdlEntry,
     sizes: EntrySizes,
     offset: u32,
 }

@@ -1,3 +1,4 @@
+use std::iter::FromIterator;
 use std::mem;
 
 use crate::span::{Span, Spanned};
@@ -41,6 +42,16 @@ impl<E> MultiErrorTrait for MultiError<E> {
     }
     fn extend_errors(&mut self, errs: impl IntoIterator<Item = Self::Error>) {
         self.0.extend(errs);
+    }
+}
+impl<E> MultiErrorTrait for Vec<E> {
+    type Error = E;
+
+    fn add_error(&mut self, err: impl Into<Self::Error>) {
+        self.push(err.into());
+    }
+    fn extend_errors(&mut self, errs: impl IntoIterator<Item = Self::Error>) {
+        self.extend(errs);
     }
 }
 
@@ -214,7 +225,31 @@ impl<T, E> MultiResult<T, E> {
         }
     }
 }
-
+impl<A, E, V> FromIterator<MultiResult<A, E>> for MultiResult<V, E>
+where
+    V: FromIterator<A>,
+{
+    /// Accumulates all errors and results into a single MultiResult.
+    ///
+    /// This doesn't do early return, it accumulates everything, including
+    /// errors.
+    fn from_iter<I: IntoIterator<Item = MultiResult<A, E>>>(iter: I) -> Self {
+        let mut errors = Vec::new();
+        let mut had_any_ok = false;
+        let with_ok = |r| {
+            errors.optionally(r).map(|a| {
+                had_any_ok = true;
+                a
+            })
+        };
+        let result = iter.into_iter().filter_map(with_ok).collect();
+        match () {
+            () if errors.is_empty() => MultiResult::Ok(result),
+            () if had_any_ok => MultiResult::OkErr(result, errors),
+            () => MultiResult::Err(errors),
+        }
+    }
+}
 impl<T, E> From<Result<T, E>> for MultiResult<T, E> {
     fn from(res: Result<T, E>) -> Self {
         match res {

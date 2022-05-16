@@ -13,3 +13,7 @@ edition = "2021"
 thiserror = "1.0"
 serde = "1.0"
 kdl = "4.2"
+
+[dev-dependencies]
+miette = {version ="4.6", features=["fancy"]}
+pretty_assertions = "1.2"

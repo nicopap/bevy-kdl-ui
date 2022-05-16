@@ -32,13 +32,10 @@ I prefix those with `t` as to distinguish them from the kdl naming convention.
 
 ### Value templates
 
-**WARNING**: the following code is not tested, it may or may not work as
-announced.
-
 The simplest template has a single child node. All later nodes with the same
 name will be expanded to the inner node.
 
-```kdl
+```kdl, initial, 1value
 my-favorite-washing-machine {
   WashingMachine noise_db=2.0 loading="Front" {
     Origin continent="Asia" country="China"
@@ -52,7 +49,7 @@ LastNodeInFile {
 }
 ```
 becomes:
-```kdl
+```kdl, target, 1value
 LastNodeInFile {
   WashingMachine noise_db=2.0 loading="Front" {
     Origin continent="Asia" country="China"
@@ -71,7 +68,7 @@ LastNodeInFile {
 
 Template nodes can refer to previously defined nodes, the reverse is false.
 
-```kdl
+```kdl, initial, 2backref
 miele-data {
   Manifacturer brand="Miele" country="Germany"
 }
@@ -89,7 +86,7 @@ LastNodeInFile {
 }
 ```
 becomes
-```kdl
+```kdl, target, 2backref
 LastNodeInFile {
   WashingMachine noise_db=2.0 loading="Front" {
     origin-data
@@ -113,7 +110,7 @@ use those templates, you must then provide values for declared `tparameters` at
 the call site.
 
 Note that you can also refer to `tparameters` by name in the call site.
-```kdl
+```kdl, initial, 3template
 my-favorite-washing-machine "noise" "loading-type" "country" {
   WashingMachine noise_db="noise" loading="loading-type" {
     Origin continent="Asia" country="country"
@@ -126,7 +123,7 @@ LastNodeInFile {
 }
 ```
 becomes
-```kdl
+```kdl, target, 3template
 LastNodeInFile {
   WashingMachine noise_db=4.0 loading="Top" {
     Origin continent="Asia" country="Thailand"
@@ -148,7 +145,7 @@ many `targuments`, or referencing `tparameter` names that do not exist.
 
 You can also pass nodes as `targument`. To do so, simply use a node with the
 the template name and the `targument` nodes as children:
-```kdl
+```kdl, initial, 4templatearg
 my-favorite-washing-machine "manifacturer" {
   WashingMachine noise_db=4.0 loading="Front" {
     Origin continent="Asia" country="China"
@@ -168,7 +165,7 @@ LastNodeInFile {
 }
 ```
 becomes
-```kdl
+```kdl, target, 4templatearg
 LastNodeInFile {
   WashingMachine noise_db=4.0 loading="Front" {
     Origin continent="Asia" country="China"par
@@ -193,7 +190,7 @@ It is possible to provide default `targuments` at the definition site. Those
 
 To provide default value `targuments`, simply use kdl parameters:
 
-```kdl
+```kdl, initial, 5defaultvalue
 my-favorite-washing-machine noise=4.0 loading-type="Top" country="China" {
   WashingMachine noise_db="noise" loading="loading-type" {
     Origin continent="Asia" country="country"
@@ -205,7 +202,7 @@ LastNodeInFile {
 }
 ```
 becomes
-```kdl
+```kdl, target, 5defaultvalue
 LastNodeInFile {
   WashingMachine noise_db=5.0 loading="Top" {
     Origin continent="Asia" country="China"
@@ -230,13 +227,13 @@ template node.
 It is currently impossible to refer to default node `tparameters` by name in
 template call.
 
-```kdl
+```kdl, initial, 6defaultnode
 miele-details {
   Info weight=40.0 volume=4.0
 }
 my-favorite-washing-machine  {
   manifacturer {
-    Manifacturer brand="Miele" country="Germany" { miele-details }
+    Manifacturer brand="Miele" country="Germany" { miele-details ; }
   }
   WashingMachine noise_db=4.0 loading="Front" {
     Origin continent="Asia" country="China"
@@ -250,12 +247,12 @@ LastNodeInFile {
   my-favorite-washing-machine {
     Manifacturer brand="GE" country="United States"
   }
-  my-favorite-washing-machine { bosh-data }
+  my-favorite-washing-machine { bosh-data ; }
   my-favorite-washing-machine
 }
 ```
 becomes
-```kdl
+```kdl, target, 6defaultnode
 LastNodeInFile {
   WashingMachine noise_db=4.0 loading="Front" {
     Origin continent="Asia" country="China"

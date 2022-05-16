@@ -52,7 +52,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use kdl::KdlValue;
+use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
 
 use crate::err::Error;
 use crate::multi_err::{MultiError, MultiErrorTrait, MultiResult};
@@ -252,20 +252,19 @@ impl<'s> EntryThunk<'s> {
     pub fn span(&self) -> Span {
         self.body.span()
     }
-
-    // TODO: do not replace names
     pub fn name(&self) -> Option<Spanned<&'s str>> {
-        let Spanned(span, name) = self.body.name()?;
-        Some(
-            self.context
-                .arguments
-                .ident(name)
-                .unwrap_or(Spanned(span, name)),
-        )
+        self.body.name()
     }
     pub fn value(&self) -> Spanned<&'s KdlValue> {
         let Spanned(s, v) = self.body.value();
         self.context.arguments.value(v).unwrap_or(Spanned(s, v))
+    }
+    pub fn evaluate(self) -> KdlEntry {
+        let value = self.value().1;
+        match self.body.entry.name() {
+            Some(name) => KdlEntry::new_prop(name.clone(), value.clone()),
+            None => KdlEntry::new(value.clone()),
+        }
     }
 }
 #[derive(Clone, Debug)]
@@ -308,6 +307,21 @@ impl<'s> NodeThunk<'s> {
         doc.into_iter()
             .flat_map(|d| d.nodes())
             .map(with_param_expanded)
+    }
+    pub fn evaluate(self) -> MultiResult<KdlNode, Spanned<Error>> {
+        let mut errors = MultiError::default();
+        let children: MultiResult<Vec<KdlNode>, _> =
+            self.children().map(|n| n.evaluate()).collect();
+        let entries: Vec<KdlEntry> = self.entries().map(|e| e.evaluate()).collect();
+        let mut node = KdlNode::new(self.body.name().1);
+        *node.entries_mut() = entries;
+        let children = multi_try!(errors, children);
+        if !children.is_empty() {
+            let mut document = KdlDocument::new();
+            *document.nodes_mut() = children;
+            node.set_children(document);
+        }
+        errors.into_result(node)
     }
 }
 impl<'s> fmt::Display for NodeThunk<'s> {
