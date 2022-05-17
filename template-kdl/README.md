@@ -275,15 +275,137 @@ It is an error for direct children of a template that are not the body node to
 have kdl entries.
 
 
-### `expand` special node
+### `expand` tparameters
 
-**WARNING**: not implemented yet.
+A template node `tparameter` with the `expand` name acts in a special manner. A node
+`tparameter` with the `expand` name must have a single argument and may have any
+amount of children. When a node with the `expand` name and the provided argument is
+encountered in the body of the template, the children node of the `targument` are
+inserted into the encompassing document.
 
-In a template body, the special node with name `expand` can be used to flatten
-a provided `targuments` into the children of a node in the body of the template.
+When called, the template node corresponding to the expand tparameter must be a node
+with no entries. The children of the node will be expanded in the body.
 
-the `expand` node specifically only allows a single argument. That argument must
-be the name of a `tparameter`. The `targument` of that parameter must be a node.
+```kdl, initial, 7-expand-arg
+my-favorite-washing-machine  {
+  // tparameters must be declared as `expand` this way
+  expand "metadata"
+  WashingMachine noise_db=4.0 loading="Front" {
+    Origin continent="Asia" country="China"
+    // And they must be used in the body this way
+    expand "metadata"
+    Material drum="steel" shield="plastic"
+  }
+}
+LastNodeInFile {
+  my-favorite-washing-machine {
+    // When calling a template with an expand tparmaeter, you must
+    // provide its targument as a node.
+    metadata {
+      Manifacturer brand="Bosch" country="Germany"
+      Info weight=40.0 volume=4.0
+    }
+  }
+  my-favorite-washing-machine {
+    metadata {
+      Info weight=40.0 volume=4.0
+    }
+  }
+}
+```
+becomes
+```kdl, target, 7-expand-arg
+LastNodeInFile {
+  WashingMachine noise_db=4.0 loading="Front" {
+    Origin continent="Asia" country="China"
+    // The node won't be expanded "as is" but inserted into the document
+    Manifacturer brand="Bosch" country="Germany"
+    Info weight=40.0 volume=4.0
+    // Notice how the nodes after the insertion are preserved
+    Material drum="steel" shield="plastic"
+  }
+  WashingMachine noise_db=4.0 loading="Front" {
+    Origin continent="Asia" country="China"
+    Info weight=40.0 volume=4.0
+    Material drum="steel" shield="plastic"
+  }
+}
+```
+
+It is also possible to provide default targuments to `expand` tparameters, just
+specify the default list of node at declaration site. The list will be replaced
+if the argument is specified.
+
+If you want the default to be an empty list, **you must** declare it as so.
+
+```kdl, initial, 8-expand-arg-default
+my-favorite-washing-machine "detergent" {
+  expand "metadata" {
+      Manifacturer brand="Bosch" country="Germany"
+      Info weight=40.0 volume=4.0
+  }
+  WashingMachine noise_db=4.0 loading="Front" {
+    Origin continent="Asia" country="China"
+    detergent
+    expand "metadata"
+  }
+}
+laundry-detergent  {
+  expand "ingredients" {
+    Surfactant "alcohol ethoxylate"
+    Builder "sodium carbonate"
+    Bleach "sodium perborate"
+  }
+  Detergent {
+    expand "ingredients"
+  }
+}
+LastNodeInFile {
+  my-favorite-washing-machine {
+    laundry-detergent
+  }
+  my-favorite-washing-machine {
+    laundry-detergent {
+      ingredients {
+        Surfactant "alkyl polyglycoside"
+        Builder "polyphosphates"
+        Bleach "tetraacetylethylenediamine"
+        Enzyme "proteases"
+      }
+    }
+    metadata {
+      Info weight=40.0 volume=4.0
+    }
+  }
+}
+```
+becomes
+```kdl, target, 8-expand-arg-default
+LastNodeInFile {
+  WashingMachine noise_db=4.0 loading="Front" {
+    Origin continent="Asia" country="China"
+    Detergent {
+      Surfactant "alcohol ethoxylate"
+      Builder "sodium carbonate"
+      Bleach "sodium perborate"
+    }
+    Manifacturer brand="Bosch" country="Germany"
+    Info weight=40.0 volume=4.0
+  }
+  WashingMachine noise_db=4.0 loading="Front" {
+    Origin continent="Asia" country="China"
+    Detergent {
+      Surfactant "alkyl polyglycoside"
+      Builder "polyphosphates"
+      Bleach "tetraacetylethylenediamine"
+      Enzyme "proteases"
+    }
+    Info weight=40.0 volume=4.0
+  }
+}
+```
+
+
 
 ### Rust API
 

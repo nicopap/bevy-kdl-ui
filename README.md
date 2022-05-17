@@ -62,6 +62,9 @@ See the relevant sections in the respective crate READMEs.
   - [X] Hashmap tuple form
 - [ ] Deduplicate similar errors
 - [ ] Add context to field errors (encompassing struct, alternative possible names etc.)
+- [ ] Error handling in `template-kdl`
+- [ ] Migrate `NodeThunkExt` to `template-kdl`
+- [ ] Use the `NodeThunkExt` API to create a `kdl-serde`
 - [X] FIX error message for too many fields in tupleStruct
 - [X] FIX that we accept .N="foo" where N is out of bound for tupleStruct
       (actually removed the feature)
@@ -74,7 +77,8 @@ See the relevant sections in the respective crate READMEs.
 - [ ] `deser`: do not store type names as string, rather just the TypeId. And
       get back the string when building the final `ConvResults`
 - [X] Actually use invocation arguments in `fn` expension
-- [ ] `expand` meta-node
+- [X] Make all `template-kdl` examples pass
+- [X] `expand` meta-node
 - [ ] add a `bundle` node so that it's possible to define multiple
       components at a time
 - [X] Formalize and list the bevy-reflect-deser format.
@@ -91,11 +95,11 @@ See the relevant sections in the respective crate READMEs.
       possible to round-trip the world, for 
 - [ ] Read and add to assets the last node in the kdl file
 - [ ] Check for `Added<Handle<Cuddly>>` and add scene
-- [ ] ?? Enable usage of kdl type specifiers and checking against expected values
+- [X] ?? Enable usage of kdl type specifiers and checking against expected values
 - [ ] ?? type-directed field assignment (arbitrary ordering of fields in kdl file
   as long as it is possible to guess to which field a node element belongs based
   on either field name or type)
-- [ ] ?? Non-String Map access.
+- [X] ?? Non-String Map access.
 - [ ] ?? Handle Enum
 
 [design-decision]: ./dev-resources/decisions#create-a-deserializer-that-encapsulates-completely-parsing
