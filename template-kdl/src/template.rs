@@ -380,6 +380,17 @@ impl<'s> FieldThunk<'s> {
         let field_name = field_name.filter(|name| name.1.value() != "-");
         Self { ty: declared_ty, name: field_name, value, span }
     }
+    pub fn pair(&self) -> Option<(FieldThunk<'s>, FieldThunk<'s>)> {
+        match &self.value {
+            ValueExt::Value(_) => None,
+            ValueExt::Node(n) => {
+                let mut fields = n.fields();
+                let n1 = fields.next()?;
+                let n2 = fields.next()?;
+                Some((n1, n2))
+            }
+        }
+    }
 }
 
 impl<'s> From<EntryThunk<'s>> for FieldThunk<'s> {
@@ -466,6 +477,21 @@ impl<'s> NodeThunk<'s> {
             node.set_children(document);
         }
         errors.into_result(node)
+    }
+    // TODO: actual error handling (eg: check there is not more than 1 etc.)
+    pub fn first_argument(&self) -> Option<Spanned<&'s KdlValue>> {
+        let mut entries = self.entries();
+        let first = entries.next();
+        let second = entries.next();
+        second
+            .is_none()
+            .then(|| first)
+            .flatten()
+            .and_then(|f| f.name().is_none().then(|| f.value()))
+    }
+
+    pub fn is_anon(&self) -> bool {
+        self.fields().next().map_or(false, |e| e.name.is_none())
     }
 }
 impl<'s> fmt::Display for NodeThunk<'s> {

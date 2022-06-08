@@ -63,7 +63,7 @@ See the relevant sections in the respective crate READMEs.
 - [ ] Deduplicate similar errors
 - [ ] Add context to field errors (encompassing struct, alternative possible names etc.)
 - [ ] Error handling in `template-kdl`
-- [ ] Migrate `NodeThunkExt` to `template-kdl`
+- [X] Migrate `NodeThunkExt` to `template-kdl`
 - [ ] Use the `NodeThunkExt` API to create a `kdl-serde`
 - [X] FIX error message for too many fields in tupleStruct
 - [X] FIX that we accept .N="foo" where N is out of bound for tupleStruct

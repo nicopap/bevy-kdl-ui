@@ -3,7 +3,7 @@ use std::fmt::Write;
 #[cfg(feature = "fancy-errors")]
 use miette::Diagnostic;
 
-use template_kdl::span::{Span, Spanned};
+use template_kdl::span::Spanned;
 
 mod miette_compat {
     #[cfg(feature = "fancy-errors")]
@@ -11,7 +11,7 @@ mod miette_compat {
 
     #[cfg(not(feature = "fancy-errors"))]
     #[derive(Clone, Copy, Debug, PartialEq)]
-    pub(super) struct SourceSpan(super::Span);
+    pub(super) struct SourceSpan(template_kdle::span::Span);
     #[cfg(not(feature = "fancy-errors"))]
     impl SourceSpan {
         pub(super) fn offset(&self) -> usize {

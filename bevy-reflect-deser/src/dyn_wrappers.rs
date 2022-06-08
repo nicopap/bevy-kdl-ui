@@ -9,12 +9,13 @@ use template_kdl::{
     multi_err::{MultiError, MultiErrorTrait, MultiResult},
     multi_try,
     span::Spanned,
+    template::{FieldThunk, NodeThunk},
 };
 
 use crate::{
     err::{ConvResult, ConvertError},
     newtype::ExpectedType,
-    visit::{FieldThunk, KdlConcrete, NodeThunkExt},
+    visit::KdlConcrete,
     DynRefl,
 };
 
@@ -22,7 +23,7 @@ pub(crate) type MultiSpan<T> = MultiResult<T, Spanned<ConvertError>>;
 pub(crate) trait Infos {
     type DynamicWrapper: Builder<Info = Self>;
     fn name(&self) -> &'static str;
-    fn new_dynamic(&self, node: &NodeThunkExt, reg: &TypeRegistry) -> MultiSpan<DynRefl> {
+    fn new_dynamic(&self, node: &NodeThunk, reg: &TypeRegistry) -> MultiSpan<DynRefl> {
         Self::DynamicWrapper::new_dynamic(self, node, reg)
     }
 }
@@ -46,14 +47,14 @@ macro_rules! impl_infos {
 }
 pub(crate) fn new_dynamic_anonstruct(
     info: &StructInfo,
-    node: &NodeThunkExt,
+    node: &NodeThunk,
     reg: &TypeRegistry,
 ) -> MultiSpan<DynRefl> {
     Wrapper::<(), _, AnonDynamicStruct>::new_dynamic(info, node, reg)
 }
 pub(crate) fn new_pairmap(
     info: &MapInfo,
-    node: &NodeThunkExt,
+    node: &NodeThunk,
     reg: &TypeRegistry,
 ) -> MultiSpan<DynRefl> {
     PairMapBuilder::new_dynamic(info, node, reg)
@@ -143,7 +144,7 @@ impl Builder for PairMapBuilder {
     fn add_field(&mut self, field: FieldThunk, reg: &TypeRegistry) -> MultiSpan<()> {
         let mut errors = MultiError::default();
         if let Some((key, value)) = field.pair() {
-            let span = field.span();
+            let span = field.span;
             let key_expected = multi_try!(
                 errors,
                 type_info(reg, None, Some(self.1.key_type_name())).map_err_span(span)
@@ -152,12 +153,12 @@ impl Builder for PairMapBuilder {
                 errors,
                 type_info(reg, None, Some(self.1.value_type_name())).map_err_span(span)
             );
-            let key = multi_try!(errors, key_expected.into_dyn(key.into(), reg));
-            let value = multi_try!(errors, value_expected.into_dyn(value.into(), reg));
+            let key = multi_try!(errors, key_expected.into_dyn(key, reg));
+            let value = multi_try!(errors, value_expected.into_dyn(value, reg));
             self.0.insert_boxed(key, value);
             errors.into_result(())
         } else {
-            let err = Spanned(field.span(), ConvertError::TupleMapDeclarationMixup);
+            let err = Spanned(field.span, ConvertError::TupleMapDeclarationMixup);
             errors.into_errors(err)
         }
     }
@@ -256,7 +257,7 @@ impl Builder for AnonTupleBuilder {
     fn add_field(&mut self, field: FieldThunk, reg: &TypeRegistry) -> MultiSpan<()> {
         let mut errors = MultiError::default();
         if let Some(Spanned(ty_span, ty_name)) = field.ty.or(field.name) {
-            let declared = get_named(ty_name, reg).map_err(|e| Spanned(ty_span, e));
+            let declared = get_named(ty_name.value(), reg).map_err(|e| Spanned(ty_span, e));
             let declared = multi_try!(errors, declared);
             let try_ty = type_info(reg, None, Some(declared.type_name())).map_err_span(ty_span);
             let ty = multi_try!(errors, try_ty);
@@ -264,7 +265,7 @@ impl Builder for AnonTupleBuilder {
             self.0.insert_boxed(value);
             MultiResult::Ok(())
         } else {
-            let with_span = |e| Spanned(field.span(), e);
+            let with_span = |e| Spanned(field.span, e);
             MultiResult::Err(vec![with_span(ConvertError::UntypedTupleField)])
         }
     }
@@ -426,7 +427,7 @@ pub(crate) trait Builder: Sized {
     fn complete(self) -> MultiResult<DynRefl, ConvertError>;
     fn new_dynamic(
         expected: &Self::Info,
-        node: &NodeThunkExt,
+        node: &NodeThunk,
         reg: &TypeRegistry,
     ) -> MultiSpan<DynRefl> {
         let mut errors = MultiError::default();
@@ -451,7 +452,7 @@ impl Builder for ValueBuilder {
     }
     fn new_dynamic(
         expected: &Self::Info,
-        node: &NodeThunkExt,
+        node: &NodeThunk,
         _: &TypeRegistry,
     ) -> MultiSpan<DynRefl> {
         if let Some(Spanned(span, value)) = node.first_argument() {
@@ -490,10 +491,10 @@ where
         let opt_ty = field.ty.or(field.name);
         // In case we have a name or declared type, we use their span for the type
         // error. Otherwise, we use the whole thunk's span.
-        let ty_span = opt_ty.map_or_else(|| field.span(), |t| t.0);
+        let ty_span = opt_ty.map_or_else(|| field.span, |t| t.0);
         let expected = self.acc.expected(&(), &self.info);
         let expected = errors.optionally(expected.map_err(|e| Spanned(ty_span, e)));
-        let try_ty = type_info(reg, opt_ty.map(|t| t.1), expected).map_err_span(ty_span);
+        let try_ty = type_info(reg, opt_ty.map(|t| t.1.value()), expected).map_err_span(ty_span);
         let ty = multi_try!(errors, try_ty);
         let value = multi_try!(errors, ty.into_dyn(field, reg));
         if let Err(err) = self.acc.add_boxed((), value) {
@@ -522,21 +523,22 @@ where
         let mut errors = MultiError::default();
         if let Some(name) = field.name {
             let expected = |n: &str| self.acc.expected(&n.to_owned(), &self.info);
-            let expected = name.map_err(expected);
+            let expected = name.map(|n| n.value()).map_err(expected);
             let expected = errors.optionally(expected);
             let opt_ty = field.ty;
             // In case we have a declared type, we use their span for the type
             // error. Otherwise, we use the name (which incidentally is required)
             let ty_span = opt_ty.map_or(name.0, |t| t.0);
-            let try_ty = type_info(reg, opt_ty.map(|t| t.1), expected).map_err_span(ty_span);
+            let try_ty =
+                type_info(reg, opt_ty.map(|t| t.1.value()), expected).map_err_span(ty_span);
             let ty = multi_try!(errors, try_ty);
             let value = multi_try!(errors, ty.into_dyn(field, reg));
-            if let Err(err) = self.acc.add_boxed(name.1.to_owned(), value) {
+            if let Err(err) = self.acc.add_boxed(name.1.value().to_owned(), value) {
                 errors.add_error(Spanned(ty_span, err));
             }
         } else {
             let err = ConvertError::UnnamedMapField { name: self.info.name() };
-            errors.add_error(Spanned(field.span(), err));
+            errors.add_error(Spanned(field.span, err));
         }
         errors.into_result(())
     }

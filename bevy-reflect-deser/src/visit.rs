@@ -8,14 +8,13 @@ use kdl::KdlDocument;
 use bevy_reflect::{TypeInfo, TypeRegistry, Typed};
 use kdl::KdlValue;
 use template_kdl::{
-    multi_err::{MultiError, MultiErrorTrait, MultiResult},
-    span::{Span, Spanned},
-    template::{EntryThunk, NodeThunk},
+    multi_err::{MultiError, MultiErrorTrait},
+    span::Spanned,
 };
 
 use crate::{
-    dyn_wrappers::{new_dynamic_anonstruct, new_pairmap, type_info, AnonTupleInfo, Infos},
-    err::{ConvertError, ConvertError::GenericUnsupported as TODO, ConvertErrors},
+    dyn_wrappers::type_info,
+    err::{ConvertError, ConvertErrors},
     ConvertResult, DynRefl,
 };
 
@@ -88,12 +87,10 @@ impl fmt::Display for KdlConcrete {
 }
 impl KdlConcrete {
     // TODO: this probably works better if we implemnt Deserialize on template-kdl
-    pub(crate) fn into_dyn(&self, expected: &TypeInfo) -> Result<DynRefl, ConvertError> {
+    pub(crate) fn into_dyn(self, expected: &TypeInfo) -> Result<DynRefl, ConvertError> {
         use KdlConcrete::*;
-        let mismatch = || ConvertError::TypeMismatch {
-            expected: expected.type_name(),
-            actual: self.to_string(),
-        };
+        let actual = self.to_string();
+        let mismatch = || ConvertError::TypeMismatch { expected: expected.type_name(), actual };
         macro_rules! int2dyn {
             (@opt $int_type:ty, $int_value:expr) => {{
                 Ok(Box::new(<$int_type>::try_from($int_value).ok()))
@@ -115,41 +112,41 @@ impl KdlConcrete {
             };
         }
         match (self, expected.type_id()) {
-            (&Int(i), ty) if ty == TypeId::of::<i8>() => int2dyn!(i8, i),
-            (&Int(i), ty) if ty == TypeId::of::<i16>() => int2dyn!(i16, i),
-            (&Int(i), ty) if ty == TypeId::of::<i32>() => int2dyn!(i32, i),
-            (&Int(i), ty) if ty == TypeId::of::<i64>() => Ok(Box::new(i)),
-            (&Int(i), ty) if ty == TypeId::of::<i128>() => int2dyn!(i128, i),
-            (&Int(i), ty) if ty == TypeId::of::<isize>() => int2dyn!(isize, i),
-            (&Int(i), ty) if ty == TypeId::of::<u8>() => int2dyn!(u8, i),
-            (&Int(i), ty) if ty == TypeId::of::<u16>() => int2dyn!(u16, i),
-            (&Int(i), ty) if ty == TypeId::of::<u32>() => int2dyn!(u32, i),
-            (&Int(i), ty) if ty == TypeId::of::<u64>() => int2dyn!(u64, i),
-            (&Int(i), ty) if ty == TypeId::of::<u128>() => int2dyn!(u128, i),
-            (&Int(i), ty) if ty == TypeId::of::<usize>() => int2dyn!(usize, i),
-            (&Int(i), ty) if ty == TypeId::of::<Option<i8>>() => int2dyn!(@opt i8, i),
-            (&Int(i), ty) if ty == TypeId::of::<Option<i16>>() => int2dyn!(@opt i16, i),
-            (&Int(i), ty) if ty == TypeId::of::<Option<i32>>() => int2dyn!(@opt i32, i),
-            (&Int(i), ty) if ty == TypeId::of::<Option<i64>>() => Ok(Box::new(Some(i))),
-            (&Int(i), ty) if ty == TypeId::of::<Option<i128>>() => int2dyn!(@opt i128, i),
-            (&Int(i), ty) if ty == TypeId::of::<Option<isize>>() => int2dyn!(@opt isize, i),
-            (&Int(i), ty) if ty == TypeId::of::<Option<u8>>() => int2dyn!(@opt u8, i),
-            (&Int(i), ty) if ty == TypeId::of::<Option<u16>>() => int2dyn!(@opt u16, i),
-            (&Int(i), ty) if ty == TypeId::of::<Option<u32>>() => int2dyn!(@opt u32, i),
-            (&Int(i), ty) if ty == TypeId::of::<Option<u64>>() => int2dyn!(@opt u64, i),
-            (&Int(i), ty) if ty == TypeId::of::<Option<u128>>() => int2dyn!(@opt u128, i),
-            (&Int(i), ty) if ty == TypeId::of::<Option<usize>>() => int2dyn!(@opt usize, i),
-            (&Int(_), _) => Err(mismatch()),
-            (&Float(f), ty) if ty == TypeId::of::<f32>() => Ok(Box::new(f as f32)),
-            (&Float(f), ty) if ty == TypeId::of::<f64>() => Ok(Box::new(f)),
-            (&Float(f), ty) if ty == TypeId::of::<Option<f32>>() => Ok(Box::new(Some(f as f32))),
-            (&Float(f), ty) if ty == TypeId::of::<Option<f64>>() => Ok(Box::new(Some(f))),
-            (&Float(_), _) => Err(mismatch()),
-            (&Bool(b), ty) if ty == TypeId::of::<bool>() => Ok(Box::new(b)),
-            (&Bool(b), ty) if ty == TypeId::of::<Option<bool>>() => Ok(Box::new(Some(b))),
-            (&Bool(_), _) => Err(mismatch()),
-            (Str(s), ty) if ty == TypeId::of::<String>() => Ok(Box::new(s.clone())),
-            (Str(s), ty) if ty == TypeId::of::<Option<String>>() => Ok(Box::new(Some(s.clone()))),
+            (Int(i), ty) if ty == TypeId::of::<i8>() => int2dyn!(i8, i),
+            (Int(i), ty) if ty == TypeId::of::<i16>() => int2dyn!(i16, i),
+            (Int(i), ty) if ty == TypeId::of::<i32>() => int2dyn!(i32, i),
+            (Int(i), ty) if ty == TypeId::of::<i64>() => Ok(Box::new(i)),
+            (Int(i), ty) if ty == TypeId::of::<i128>() => int2dyn!(i128, i),
+            (Int(i), ty) if ty == TypeId::of::<isize>() => int2dyn!(isize, i),
+            (Int(i), ty) if ty == TypeId::of::<u8>() => int2dyn!(u8, i),
+            (Int(i), ty) if ty == TypeId::of::<u16>() => int2dyn!(u16, i),
+            (Int(i), ty) if ty == TypeId::of::<u32>() => int2dyn!(u32, i),
+            (Int(i), ty) if ty == TypeId::of::<u64>() => int2dyn!(u64, i),
+            (Int(i), ty) if ty == TypeId::of::<u128>() => int2dyn!(u128, i),
+            (Int(i), ty) if ty == TypeId::of::<usize>() => int2dyn!(usize, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<i8>>() => int2dyn!(@opt i8, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<i16>>() => int2dyn!(@opt i16, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<i32>>() => int2dyn!(@opt i32, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<i64>>() => Ok(Box::new(Some(i))),
+            (Int(i), ty) if ty == TypeId::of::<Option<i128>>() => int2dyn!(@opt i128, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<isize>>() => int2dyn!(@opt isize, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<u8>>() => int2dyn!(@opt u8, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<u16>>() => int2dyn!(@opt u16, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<u32>>() => int2dyn!(@opt u32, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<u64>>() => int2dyn!(@opt u64, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<u128>>() => int2dyn!(@opt u128, i),
+            (Int(i), ty) if ty == TypeId::of::<Option<usize>>() => int2dyn!(@opt usize, i),
+            (Int(_), _) => Err(mismatch()),
+            (Float(f), ty) if ty == TypeId::of::<f32>() => Ok(Box::new(f as f32)),
+            (Float(f), ty) if ty == TypeId::of::<f64>() => Ok(Box::new(f)),
+            (Float(f), ty) if ty == TypeId::of::<Option<f32>>() => Ok(Box::new(Some(f as f32))),
+            (Float(f), ty) if ty == TypeId::of::<Option<f64>>() => Ok(Box::new(Some(f))),
+            (Float(_), _) => Err(mismatch()),
+            (Bool(b), ty) if ty == TypeId::of::<bool>() => Ok(Box::new(b)),
+            (Bool(b), ty) if ty == TypeId::of::<Option<bool>>() => Ok(Box::new(Some(b))),
+            (Bool(_), _) => Err(mismatch()),
+            (Str(s), ty) if ty == TypeId::of::<String>() => Ok(Box::new(s)),
+            (Str(s), ty) if ty == TypeId::of::<Option<String>>() => Ok(Box::new(Some(s))),
             (Str(_), _) => Err(mismatch()),
 
             (Null, ty) => null2dyn!(
@@ -157,139 +154,5 @@ impl KdlConcrete {
                 String,
             ),
         }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) enum ValueExt<'s> {
-    Node(NodeThunkExt<'s>),
-    Value(Spanned<&'s KdlValue>),
-}
-impl<'s> fmt::Display for ValueExt<'s> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Node(node) => write!(f, "{node}"),
-            Self::Value(Spanned(_, value)) => write!(f, "{value}"),
-        }
-    }
-}
-impl<'s> ValueExt<'s> {
-    fn span(&self) -> Span {
-        match self {
-            Self::Node(node) => node.span(),
-            Self::Value(value) => value.0,
-        }
-    }
-    pub(crate) fn into_dyn<'a>(
-        &self,
-        expected: Option<&'a TypeInfo>,
-        reg: &'a TypeRegistry,
-    ) -> MultiResult<DynRefl, Spanned<ConvertError>> {
-        use TypeInfo::{List, Map, Struct, Tuple, TupleStruct, Value};
-        use ValueExt::Node;
-        match (self, expected) {
-            (Node(node), None) => AnonTupleInfo.new_dynamic(node, reg),
-            (Node(node), Some(Map(v))) if node.is_anon() => new_pairmap(v, node, reg),
-            (Node(node), Some(Map(v))) => v.new_dynamic(node, reg),
-            (Node(node), Some(List(v))) => v.new_dynamic(node, reg),
-            (Node(node), Some(Tuple(v))) => v.new_dynamic(node, reg),
-            (Node(node), Some(Value(v))) => v.new_dynamic(node, reg),
-            (Node(node), Some(Struct(v))) if !node.is_anon() => v.new_dynamic(node, reg),
-            (Node(node), Some(Struct(v))) => new_dynamic_anonstruct(v, node, reg),
-            (Node(node), Some(TupleStruct(v))) => v.new_dynamic(node, reg),
-            (ValueExt::Value(value), Some(expected)) => KdlConcrete::from(value.1.clone())
-                .into_dyn(expected)
-                .map_err(|e| Spanned(value.0, e))
-                .into(),
-            (value, info) => MultiResult::Err(vec![Spanned(
-                value.span(),
-                TODO(format!("cannot turn node into type: {value:?} \n {info:?}")),
-            )]),
-        }
-    }
-}
-
-pub(crate) struct FieldThunk<'s> {
-    pub(crate) ty: Option<Spanned<&'s str>>,
-    pub(crate) name: Option<Spanned<&'s str>>,
-    pub(crate) value: ValueExt<'s>,
-    span: Span,
-}
-
-impl<'s> FieldThunk<'s> {
-    fn new(
-        declared_ty: Option<Spanned<&'s str>>,
-        field_name: Option<Spanned<&'s str>>,
-        value: ValueExt<'s>,
-        span: Span,
-    ) -> Self {
-        let field_name = field_name.filter(|name| name.1 != "-");
-        Self { ty: declared_ty, name: field_name, value, span }
-    }
-    pub(crate) fn span(&self) -> Span {
-        self.span
-    }
-    pub(crate) fn pair(&self) -> Option<(FieldThunk<'s>, FieldThunk<'s>)> {
-        match &self.value {
-            ValueExt::Value(_) => None,
-            ValueExt::Node(n) => {
-                let mut fields = n.fields();
-                let n1 = fields.next()?;
-                let n2 = fields.next()?;
-                Some((n1, n2))
-            }
-        }
-    }
-}
-
-impl<'s> From<EntryThunk<'s>> for FieldThunk<'s> {
-    fn from(entry: EntryThunk<'s>) -> Self {
-        let span = entry.span();
-        let value = ValueExt::Value(entry.value());
-        Self::new(entry.ty(), entry.name(), value, span)
-    }
-}
-impl<'s> From<NodeThunk<'s>> for FieldThunk<'s> {
-    fn from(node: NodeThunk<'s>) -> Self {
-        let span = node.span();
-        Self::new(
-            node.ty(),
-            Some(node.name()),
-            ValueExt::Node(NodeThunkExt(node)),
-            span,
-        )
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct NodeThunkExt<'s>(NodeThunk<'s>);
-impl<'s> fmt::Display for NodeThunkExt<'s> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<'s> NodeThunkExt<'s> {
-    // TODO: actual error handling (eg: check there is not more than 1 etc.)
-    pub(crate) fn first_argument(&self) -> Option<Spanned<&'s KdlValue>> {
-        let mut entries = self.0.entries();
-        let first = entries.next();
-        let second = entries.next();
-        second
-            .is_none()
-            .then(|| first)
-            .flatten()
-            .and_then(|f| f.name().is_none().then(|| f.value()))
-    }
-    pub(crate) fn fields(&self) -> impl Iterator<Item = FieldThunk<'s>> {
-        let entries = self.0.entries().map(Into::into);
-        let children = self.0.children().map(Into::into);
-        entries.chain(children)
-    }
-    pub(crate) fn span(&self) -> Span {
-        self.0.span()
-    }
-    fn is_anon(&self) -> bool {
-        self.fields().next().map_or(false, |e| e.name.is_none())
     }
 }
