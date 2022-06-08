@@ -405,8 +405,6 @@ LastNodeInFile {
 }
 ```
 
-
-
 ### Rust API
 
 TODO

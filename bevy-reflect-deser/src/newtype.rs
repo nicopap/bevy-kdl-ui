@@ -42,21 +42,21 @@ impl<'r> ExpectedType<'r> {
                 (MultiOk(ref mut inner), TypeInfo::Struct(info)) => {
                     let field = info.field_at(0).unwrap().name();
                     let mut acc = DynamicStruct::default();
-                    acc.set_name(info.id().type_name().to_owned());
+                    acc.set_name(info.type_name().to_owned());
                     let old_inner = mem::replace(inner, Box::new(()));
                     acc.insert_boxed(field, old_inner);
                     *inner = Box::new(acc);
                 }
                 (MultiOk(ref mut inner), TypeInfo::Tuple(info)) => {
                     let mut acc = DynamicTuple::default();
-                    acc.set_name(info.id().type_name().to_owned());
+                    acc.set_name(info.type_name().to_owned());
                     let old_inner = mem::replace(inner, Box::new(()));
                     acc.insert_boxed(old_inner);
                     *inner = Box::new(acc);
                 }
                 (MultiOk(ref mut inner), TypeInfo::TupleStruct(info)) => {
                     let mut acc = DynamicTupleStruct::default();
-                    acc.set_name(info.id().type_name().to_owned());
+                    acc.set_name(info.type_name().to_owned());
                     let old_inner = mem::replace(inner, Box::new(()));
                     acc.insert_boxed(old_inner);
                     *inner = Box::new(acc);
@@ -80,19 +80,19 @@ impl<'r> ExpectedType<'r> {
                     // unwrap: We just checked the length is 1
                     let field = info.field_at(0).unwrap();
                     // TODO: unwrap
-                    expected = reg.get_type_info(field.id().type_id()).unwrap();
+                    expected = reg.get_type_info(field.type_id()).unwrap();
                 }
                 Tuple(info) if info.field_len() == 1 => {
                     // unwrap: We just checked the length is 1
                     let field = info.field_at(0).unwrap();
                     // TODO: unwrap
-                    expected = reg.get_type_info(field.id().type_id()).unwrap();
+                    expected = reg.get_type_info(field.type_id()).unwrap();
                 }
                 TupleStruct(info) if info.field_len() == 1 => {
                     // unwrap: We just checked the length is 1
                     let field = info.field_at(0).unwrap();
                     // TODO: unwrap
-                    expected = reg.get_type_info(field.id().type_id()).unwrap();
+                    expected = reg.get_type_info(field.type_id()).unwrap();
                 }
                 _ => return Self { tys },
             }

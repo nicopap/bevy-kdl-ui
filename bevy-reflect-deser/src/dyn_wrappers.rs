@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use bevy_reflect::{
     DynamicList, DynamicMap, DynamicStruct, DynamicTuple, DynamicTupleStruct, ListInfo, Map,
     MapInfo, NamedField, Reflect, Struct, StructInfo, Tuple, TupleInfo, TupleStruct,
-    TupleStructInfo, TypeIdentity, TypeInfo, TypeRegistration, TypeRegistry, ValueInfo,
+    TupleStructInfo, TypeInfo, TypeRegistration, TypeRegistry, ValueInfo,
 };
 use template_kdl::{
     multi_err::{MultiError, MultiErrorTrait, MultiResult},
@@ -34,7 +34,7 @@ macro_rules! impl_infos {
         impl Infos for $ty_name {
             type DynamicWrapper = Wrapper<$field, $ty_name, $dynamic>;
             fn name(&self) -> &'static str {
-                self.id().type_name()
+                self.type_name()
             }
         }
         impl<'i> FromInfo<&'i $ty_name> for $dynamic {
@@ -66,7 +66,7 @@ impl_infos! {TupleStructInfo, (), DynamicTupleStruct}
 impl Infos for ValueInfo {
     type DynamicWrapper = ValueBuilder;
     fn name(&self) -> &'static str {
-        self.id().type_name()
+        self.type_name()
     }
 }
 
@@ -84,13 +84,10 @@ pub(crate) fn get_named<'r>(name: &str, reg: &'r TypeRegistry) -> ConvResult<&'r
 pub(crate) fn type_info<'r>(
     reg: &'r TypeRegistry,
     declared: Option<&str>,
-    expected: Option<&TypeIdentity>,
+    expected: Option<&str>,
 ) -> MultiResult<ExpectedType<'r>, ConvertError> {
     let mut errors = MultiError::default();
-    let no_such = |e: &TypeIdentity| ConvertError::NoSuchType(e.type_name().to_owned());
-    let get_from_reg =
-        |e: &TypeIdentity| errors.optionally(reg.get(e.type_id()).ok_or_else(|| no_such(e)));
-    let expected = expected.and_then(get_from_reg);
+    let expected = expected.and_then(|e| errors.optionally(get_named(e, reg)));
     match (declared, expected) {
         (Some("Tuple"), Some(expected)) => {
             return errors.into_result(ExpectedType::new(expected, reg))
@@ -100,21 +97,21 @@ pub(crate) fn type_info<'r>(
         }
         _ => {}
     }
-    let declared = declared.and_then(|name| errors.optionally(get_named(name, reg)));
+    let declared = declared.and_then(|e| errors.optionally(get_named(e, reg)));
     match (declared, expected) {
         // Both declared and expected are registered, but they are not equal
         // We chose `declared` since that's what is in the file, so we expect that
         // the rest of the file uses the declaredly stated type.
         (Some(declared), Some(expected)) if declared.type_id() != expected.type_id() => {
-            let expected = expected.name().to_owned();
-            let actual = declared.name().to_owned();
+            let expected = expected.type_name();
+            let actual = declared.type_name().to_owned();
             errors.add_error(ConvertError::TypeMismatch { expected, actual });
             errors.into_result(ExpectedType::new(declared, reg))
         }
         // Either declared was not provided, or it was not registered (in which case
         // the error is already in `errors`) or it was provided, registered and matched
         // expected. And expected is registered
-        (Some(_) | None, Some(expected)) => errors.into_result(ExpectedType::new(expected, reg)),
+        (_, Some(expected)) => errors.into_result(ExpectedType::new(expected, reg)),
         // Either declared was not provided, or it was not registered (in which case
         // the error is already in `errors`) and expected is not registered
         // NOTE: This is the only Fatal error preventing any validation of what's inside.
@@ -125,13 +122,12 @@ pub(crate) fn type_info<'r>(
         (Some(declared), None) => errors.into_result(ExpectedType::new(declared, reg)),
     }
 }
-type Tid = TypeIdentity;
 pub(crate) trait Primitive {
     type Field;
     type Info: Infos;
     fn set_name(&mut self, name: String);
     fn add_boxed(&mut self, field: Self::Field, boxed: DynRefl) -> ConvResult<()>;
-    fn expected<'i>(&self, at_field: &Self::Field, info: &'i Self::Info) -> ConvResult<&'i Tid>;
+    fn expected(&self, at_field: &Self::Field, info: &Self::Info) -> ConvResult<&'static str>;
     fn validate(&self, info: &Self::Info) -> ConvResult<()>;
     fn reflect(self) -> Box<dyn Reflect>;
 }
@@ -150,11 +146,11 @@ impl Builder for PairMapBuilder {
             let span = field.span();
             let key_expected = multi_try!(
                 errors,
-                type_info(reg, None, Some(self.1.key())).map_err_span(span)
+                type_info(reg, None, Some(self.1.key_type_name())).map_err_span(span)
             );
             let value_expected = multi_try!(
                 errors,
-                type_info(reg, None, Some(self.1.value())).map_err_span(span)
+                type_info(reg, None, Some(self.1.value_type_name())).map_err_span(span)
             );
             let key = multi_try!(errors, key_expected.into_dyn(key.into(), reg));
             let value = multi_try!(errors, value_expected.into_dyn(value.into(), reg));
@@ -175,14 +171,15 @@ impl Primitive for DynamicMap {
     type Info = MapInfo;
     fn add_boxed(&mut self, field: String, boxed: DynRefl) -> ConvResult<()> {
         if self.get(&field).is_some() {
-            return Err(ConvertError::MultipleSameField { name: self.name().to_owned(), field });
+            let name = self.name().to_owned();
+            return Err(ConvertError::MultipleSameField { name, field });
         }
-        let box_field = Box::new(field.clone());
+        let box_field = Box::new(field);
         self.insert_boxed(box_field, boxed);
         Ok(())
     }
-    fn expected<'i>(&self, _: &String, info: &'i MapInfo) -> ConvResult<&'i Tid> {
-        Ok(info.value())
+    fn expected(&self, _: &String, info: &MapInfo) -> ConvResult<&'static str> {
+        Ok(info.value_type_name())
     }
     fn set_name(&mut self, name: String) {
         self.set_name(name);
@@ -199,20 +196,20 @@ impl Primitive for DynamicStruct {
     type Info = StructInfo;
     fn add_boxed(&mut self, field: String, boxed: DynRefl) -> ConvResult<()> {
         if self.field(&field).is_some() {
-            return Err(ConvertError::MultipleSameField { name: self.name().to_owned(), field });
+            let name = self.name().to_owned();
+            return Err(ConvertError::MultipleSameField { name, field });
         }
         self.insert_boxed(&field, boxed);
         Ok(())
     }
-    fn expected<'i>(&self, field: &String, info: &'i Self::Info) -> ConvResult<&'i Tid> {
-        let name_type =
-            |field: &NamedField| (field.name().clone().into_owned(), field.id().type_id());
+    fn expected(&self, field: &String, info: &Self::Info) -> ConvResult<&'static str> {
+        let name_type = |field: &NamedField| (field.name().clone().into_owned(), field.type_name());
         let err = || ConvertError::NoSuchStructField {
-            name: info.name().to_owned(),
+            name: info.name(),
             available: info.iter().map(name_type).collect(),
             requested: field.clone(),
         };
-        info.field(&*field).ok_or_else(err).map(|f| f.id())
+        info.field(&*field).ok_or_else(err).map(|f| f.type_name())
     }
     fn set_name(&mut self, name: String) {
         self.set_name(name);
@@ -261,8 +258,7 @@ impl Builder for AnonTupleBuilder {
         if let Some(Spanned(ty_span, ty_name)) = field.ty.or(field.name) {
             let declared = get_named(ty_name, reg).map_err(|e| Spanned(ty_span, e));
             let declared = multi_try!(errors, declared);
-            let declared = TypeIdentity::new(declared.name(), declared.type_id());
-            let try_ty = type_info(reg, None, Some(&declared)).map_err_span(ty_span);
+            let try_ty = type_info(reg, None, Some(declared.type_name())).map_err_span(ty_span);
             let ty = multi_try!(errors, try_ty);
             let value = multi_try!(errors, ty.into_dyn(field, reg));
             self.0.insert_boxed(value);
@@ -300,14 +296,16 @@ impl Primitive for AnonDynamicStruct {
         self.0.insert_boxed(next_field.name(), boxed);
         Ok(())
     }
-    fn expected<'i>(&self, _: &(), info: &'i Self::Info) -> ConvResult<&'i Tid> {
+    fn expected(&self, _: &(), info: &Self::Info) -> ConvResult<&'static str> {
         let requested = self.0.field_len();
         let err = || ConvertError::TooManyTupleStructFields {
             name: info.name(),
             actual: info.field_len() as u8,
             requested: requested as u8,
         };
-        info.field_at(requested).ok_or_else(err).map(|f| f.id())
+        info.field_at(requested)
+            .ok_or_else(err)
+            .map(|f| f.type_name())
     }
     fn set_name(&mut self, name: String) {
         self.0.set_name(name);
@@ -335,8 +333,8 @@ impl Primitive for DynamicList {
         self.push_box(boxed);
         Ok(())
     }
-    fn expected<'i>(&self, _: &(), info: &'i Self::Info) -> ConvResult<&'i Tid> {
-        Ok(info.item())
+    fn expected(&self, _: &(), info: &Self::Info) -> ConvResult<&'static str> {
+        Ok(info.item_type_name())
     }
     fn set_name(&mut self, name: String) {
         self.set_name(name);
@@ -355,13 +353,15 @@ impl Primitive for DynamicTuple {
         self.insert_boxed(boxed);
         Ok(())
     }
-    fn expected<'i>(&self, _: &(), info: &'i Self::Info) -> ConvResult<&'i Tid> {
+    fn expected(&self, _: &(), info: &Self::Info) -> ConvResult<&'static str> {
         let requested = self.field_len();
         let err = || ConvertError::TooManyTupleFields {
             actual: info.field_len() as u8,
             requested: requested as u8,
         };
-        info.field_at(requested).ok_or_else(err).map(|f| f.id())
+        info.field_at(requested)
+            .ok_or_else(err)
+            .map(|f| f.type_name())
     }
     fn set_name(&mut self, name: String) {
         self.set_name(name);
@@ -388,14 +388,16 @@ impl Primitive for DynamicTupleStruct {
         self.insert_boxed(boxed);
         Ok(())
     }
-    fn expected<'i>(&self, _: &(), info: &'i Self::Info) -> ConvResult<&'i Tid> {
+    fn expected(&self, _: &(), info: &Self::Info) -> ConvResult<&'static str> {
         let requested = self.field_len();
         let err = || ConvertError::TooManyTupleStructFields {
             name: info.name(),
             actual: info.field_len() as u8,
             requested: requested as u8,
         };
-        info.field_at(requested).ok_or_else(err).map(|f| f.id())
+        info.field_at(requested)
+            .ok_or_else(err)
+            .map(|f| f.type_name())
     }
     fn set_name(&mut self, name: String) {
         self.set_name(name);
@@ -519,8 +521,8 @@ where
     fn add_field(&mut self, field: FieldThunk, reg: &TypeRegistry) -> MultiSpan<()> {
         let mut errors = MultiError::default();
         if let Some(name) = field.name {
-            let expect = |n: &str| self.acc.expected(&n.to_owned(), &self.info);
-            let expected = name.map_err(expect);
+            let expected = |n: &str| self.acc.expected(&n.to_owned(), &self.info);
+            let expected = name.map_err(expected);
             let expected = errors.optionally(expected);
             let opt_ty = field.ty;
             // In case we have a declared type, we use their span for the type
@@ -533,7 +535,7 @@ where
                 errors.add_error(Spanned(ty_span, err));
             }
         } else {
-            let err = ConvertError::UnnamedMapField { name: self.info.name().to_owned() };
+            let err = ConvertError::UnnamedMapField { name: self.info.name() };
             errors.add_error(Spanned(field.span(), err));
         }
         errors.into_result(())

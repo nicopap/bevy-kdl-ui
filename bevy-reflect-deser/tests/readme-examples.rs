@@ -1,7 +1,7 @@
 use std::any::{type_name, Any};
 use std::fmt;
 
-use bevy_reflect::{FromReflect, Reflect, TypeRegistration, TypeRegistry};
+use bevy_reflect::{FromReflect, Reflect, TypeRegistration, TypeRegistry, Typed};
 use bevy_reflect_deser::{convert_doc, from_doc, ConvertErrors};
 use bevy_utils::HashMap;
 use miette::GraphicalReportHandler;
@@ -96,7 +96,7 @@ fn extract_kdls() -> impl Iterator<Item = KdlSection> {
     })
 }
 
-fn assert_all_lines_eq_kdl<T: FromReflect + PartialEq + fmt::Debug + Any>(
+fn assert_all_lines_eq_kdl<T: FromReflect + PartialEq + fmt::Debug + Typed>(
     section_no: u32,
     text: &str,
     value: &T,

@@ -1,11 +1,11 @@
 use std::{
-    any::{self, Any, TypeId},
+    any::{self, TypeId},
     fmt,
 };
 
 use kdl::KdlDocument;
 
-use bevy_reflect::{TypeInfo, TypeRegistry};
+use bevy_reflect::{TypeInfo, TypeRegistry, Typed};
 use kdl::KdlValue;
 use template_kdl::{
     multi_err::{MultiError, MultiErrorTrait, MultiResult},
@@ -35,12 +35,12 @@ pub fn convert_doc(doc: &KdlDocument, registry: &TypeRegistry) -> ConvertResult<
         Err(ConvertErrors::new(doc_repr, errors.errors().to_vec()))
     }
 }
-pub fn from_doc<T: Any>(doc: &KdlDocument, registry: &TypeRegistry) -> ConvertResult<DynRefl> {
+pub fn from_doc<T: Typed>(doc: &KdlDocument, registry: &TypeRegistry) -> ConvertResult<DynRefl> {
     let mut errors = MultiError::default();
     let doc_repr = doc.to_string();
     let template_map = |err: Spanned<_>| err.map(ConvertError::Template);
     if let Some(doc) = errors.optionally(template_kdl::read_document(doc).map_err(template_map)) {
-        let expected = registry.get_type_info(TypeId::of::<T>()).map(|r| r.id());
+        let expected = Some(T::type_info().type_name());
         let Spanned(name_span, _) = doc.ty().unwrap_or_else(|| doc.name());
         let expected = type_info(registry, None, expected).map_err_span(name_span);
         expected
@@ -90,9 +90,8 @@ impl KdlConcrete {
     // TODO: this probably works better if we implemnt Deserialize on template-kdl
     pub(crate) fn into_dyn(&self, expected: &TypeInfo) -> Result<DynRefl, ConvertError> {
         use KdlConcrete::*;
-        let expected = expected.id();
         let mismatch = || ConvertError::TypeMismatch {
-            expected: expected.type_name().to_owned(),
+            expected: expected.type_name(),
             actual: self.to_string(),
         };
         macro_rules! int2dyn {

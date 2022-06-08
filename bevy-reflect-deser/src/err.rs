@@ -1,4 +1,3 @@
-use std::any::TypeId;
 use std::fmt::Write;
 
 #[cfg(feature = "fancy-errors")]
@@ -31,6 +30,8 @@ mod miette_compat {
 }
 use miette_compat::*;
 
+// TODO: consider using TypeId instead of &'static str and String, and convert
+// into "proper" error message at one point with the help of the registry
 /// Ways for the conversion from KDL to Reflect to fail
 #[derive(Debug, Clone, thiserror::Error, PartialEq)]
 pub enum ConvertError {
@@ -38,9 +39,11 @@ pub enum ConvertError {
     GenericUnsupported(String),
     #[error("Templating error: {0}")]
     Template(#[from] template_kdl::err::Error),
-    // TODO: store TypeId instead, and expected: Vec<TypeId>
     #[error("Kdl declaration has type `{actual}` but rust type `{expected}` was expected")]
-    TypeMismatch { expected: String, actual: String },
+    TypeMismatch {
+        expected: &'static str,
+        actual: String,
+    },
     #[error("Invalid integer, value {0} out of bound for rust type: {1}")]
     IntDomain(i64, &'static str),
     #[error("There is no such registered type: {0}")]
@@ -54,8 +57,8 @@ pub enum ConvertError {
     #[error("{requested} is not a field of {name}")]
     NoSuchStructField {
         requested: String,
-        name: String,
-        available: Vec<(String, TypeId)>,
+        name: &'static str,
+        available: Vec<(String, &'static str)>,
     },
     #[error("{name} has {actual} fields, but the declaration contains at least {requested}")]
     TooManyTupleStructFields {
@@ -76,7 +79,7 @@ pub enum ConvertError {
     #[error("List cannot be declared using explicit positioning. expected `-`, got `{0}`")]
     NamedListDeclaration(String),
     #[error("{name} requires all its field to be named, but one of them wasn't.")]
-    UnnamedMapField { name: String },
+    UnnamedMapField { name: &'static str },
     #[error("The declaration of this Map started in tuple style, but this field has a name.")]
     TupleMapDeclarationMixup,
     #[error("Field at component declaration site.")]
