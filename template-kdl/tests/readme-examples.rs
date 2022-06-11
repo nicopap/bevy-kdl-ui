@@ -1,9 +1,8 @@
 use std::str::FromStr;
 
 use kdl::{KdlDocument, KdlEntry, KdlNode};
-use miette::GraphicalReportHandler;
 use pretty_assertions::assert_eq;
-use template_kdl::read_document;
+use template_kdl::read_thunk;
 
 const README: &'static str = include_str!("../README.md");
 
@@ -72,7 +71,7 @@ fn extract_kdls(side: TemplateSide) -> impl Iterator<Item = KdlSection> {
 fn assert_eq_kdl(section_name: &str, target: &str, initial: &str) -> miette::Result<()> {
     println!("in section {section_name}");
     let actual: KdlDocument = initial.parse()?;
-    let mut actual: KdlNode = read_document(&actual)
+    let mut actual: KdlNode = read_thunk(actual)
         .into_result()
         .unwrap()
         .evaluate()

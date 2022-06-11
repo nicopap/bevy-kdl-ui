@@ -7,6 +7,7 @@ use std::fmt;
 use std::ops::Range;
 
 use kdl::{KdlDocument, KdlEntry, KdlIdentifier, KdlNode, KdlValue};
+use mappable_rc::Marc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Span {
@@ -25,12 +26,11 @@ impl<T> Spanned<T> {
         f(t).map_err(|u| Spanned(span, u))
     }
 }
-impl<'a, T> Spanned<&'a T> {
-    pub fn map_cloned<U, F>(self, f: F) -> Spanned<U>
-    where
-        F: FnOnce(T) -> U,
-        T: Clone,
-    {
+impl<'a, T: Clone> Spanned<&'a T> {
+    pub fn cloned(self) -> Spanned<T> {
+        self.map(|t| t.clone())
+    }
+    pub fn map_cloned<U, F: FnOnce(T) -> U>(self, f: F) -> Spanned<U> {
         let Spanned(span, t) = self;
         Spanned(span, f(t.clone()))
     }
@@ -50,23 +50,6 @@ impl Span {
         (self.offset as usize, self.size as usize)
     }
 }
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct NodeSizes {
-    pub(crate) leading: u32,
-    pub(crate) ty: u32,
-    pub(crate) name: u32,
-    // includes before_children & opening curly if children exist
-    entries: u32,
-    children: u32,
-}
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct EntrySizes {
-    pub(crate) leading: u32,
-    pub(crate) ty: u32,
-    pub(crate) name: u32,
-    pub(crate) value: u32,
-}
-
 trait AdhocLen {
     fn size(&self) -> u32;
 }
@@ -105,128 +88,178 @@ impl AdhocLen for KdlNode {
         self.len() as u32
     }
 }
-
-pub(crate) trait OffsetExt {
-    type Out;
-    fn sizes(&self) -> Self::Out;
-}
-impl OffsetExt for KdlNode {
-    type Out = NodeSizes;
-    fn sizes(&self) -> NodeSizes {
-        let opening_curly = self.children().map_or(0, |_| 1);
-        let pre_children = self.before_children().size() + opening_curly;
-        NodeSizes {
-            leading: self.leading().size(),
-            ty: self.ty().map_or(0, |t| t.size() + 2),
-            name: self.name().size(),
-            entries: self.entries().size() + pre_children,
-            children: self.children().map_or(0, |c| c.size()),
+impl AdhocLen for KdlValue {
+    fn size(&self) -> u32 {
+        let must_escape = ['\n', '\\', '"', '\r', '\t', '\u{08}', '\u{0C}'];
+        match self {
+            KdlValue::Base10Float(value) => {
+                let clean = match () {
+                    () if value == &f64::INFINITY => f64::MAX,
+                    () if value == &f64::NEG_INFINITY => -f64::MAX,
+                    () if value.is_nan() => 0.0,
+                    () => *value,
+                };
+                format!("{clean:?}").len() as u32
+            }
+            KdlValue::Bool(true) => 4,
+            KdlValue::Bool(false) => 5,
+            KdlValue::Null => 4,
+            KdlValue::RawString(_) => format!("{self}").len() as u32,
+            KdlValue::String(s) => (s.len() + 2 + s.matches(must_escape).count()) as u32,
+            KdlValue::Base2(value) => 2 + (64 - value.leading_zeros()),
+            KdlValue::Base8(value) => 2 + ((64 - value.leading_zeros()) / 3),
+            KdlValue::Base16(value) => 2 + ((64 - value.leading_zeros()) / 4),
+            KdlValue::Base10(value) => format!("{value:?}").len() as u32,
         }
     }
 }
-impl OffsetExt for KdlEntry {
-    type Out = EntrySizes;
-    fn sizes(&self) -> EntrySizes {
-        let leading = self.leading().size();
-        let ty = self.ty().map_or(0, |t| t.size() + 2);
-        let name = self.name().map_or(0, |t| t.size() + 1);
-        let trailing = self.trailing().size();
-        let remains = leading + ty + name + trailing;
-        EntrySizes {
-            leading,
-            name,
-            ty,
-            value: self
-                .value_repr()
-                .map_or(self.len() as u32 - remains, |t| t.size()),
+
+trait KdlNodeSizeExt {
+    fn ty_len(&self) -> u32;
+    fn name_len(&self) -> u32;
+    fn entries_len(&self) -> u32;
+    fn children_len(&self) -> u32;
+    fn full_len(&self) -> u32;
+}
+impl KdlNodeSizeExt for KdlNode {
+    fn ty_len(&self) -> u32 {
+        self.ty().map_or(0, |t| t.size() + 2)
+    }
+    fn name_len(&self) -> u32 {
+        self.name().size()
+    }
+    fn entries_len(&self) -> u32 {
+        let opening_curly = self.children().map_or(0, |_| 1);
+        let pre_children = self.before_children().size() + opening_curly;
+        self.entries().size() + pre_children
+    }
+    fn children_len(&self) -> u32 {
+        self.children().map_or(0, |c| c.size())
+    }
+    fn full_len(&self) -> u32 {
+        self.ty_len() + self.name_len() + self.entries_len() + self.children_len()
+    }
+}
+trait KdlEntrySizeExt {
+    fn leading_len(&self) -> u32;
+    fn ty_len(&self) -> u32;
+    fn name_len(&self) -> u32;
+    fn value_len(&self) -> u32;
+}
+impl KdlEntrySizeExt for KdlEntry {
+    fn leading_len(&self) -> u32 {
+        self.leading().size()
+    }
+    fn ty_len(&self) -> u32 {
+        self.ty().map_or(0, |t| t.size() + 2)
+    }
+    fn name_len(&self) -> u32 {
+        self.name().map_or(0, |t| t.size() + 1)
+    }
+    fn value_len(&self) -> u32 {
+        match self.value_repr() {
+            Some(repr) => repr.size(),
+            None => self.value().size(),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SpannedIdent<'a> {
+    ident: &'a KdlIdentifier,
+    offset: u32,
+}
+impl<'a> SpannedIdent<'a> {
+    pub fn value(self) -> &'a str {
+        self.ident.value()
+    }
+    pub fn span(self) -> Span {
+        Span { offset: self.offset, size: self.ident.size() }
     }
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SpannedEntry<'a> {
     pub(crate) entry: &'a KdlEntry,
-    sizes: EntrySizes,
     offset: u32,
 }
 impl<'a> SpannedEntry<'a> {
     pub(crate) fn new(entry: &'a KdlEntry, offset: u32) -> Self {
-        let sizes = entry.sizes();
-        Self { sizes, entry, offset }
+        Self { entry, offset }
     }
-    pub(crate) fn name(&self) -> Option<Spanned<&'a KdlIdentifier>> {
-        let EntrySizes { leading, name, .. } = self.sizes;
-        let name_span = Span { offset: self.offset + leading, size: name };
-        self.entry.name().map(|n| Spanned(name_span, n))
+    pub(crate) fn name(&self) -> Option<SpannedIdent<'a>> {
+        let leading = self.entry.leading_len();
+        let ident = self.entry.name()?;
+        Some(SpannedIdent { offset: self.offset + leading, ident })
     }
     pub(crate) fn value(&self) -> Spanned<&'a KdlValue> {
-        let EntrySizes { leading, ty, name, value, .. } = self.sizes;
+        let leading = self.entry.leading_len();
+        let ty = self.entry.ty_len();
+        let name = self.entry.name_len();
         let value_span = Span {
             offset: self.offset + leading + ty + name,
-            size: value,
+            size: self.entry.value_len(),
         };
         Spanned(value_span, self.entry.value())
     }
-    pub(crate) fn ty(&self) -> Option<Spanned<&'a KdlIdentifier>> {
-        let EntrySizes { leading, name, ty, .. } = self.sizes;
-        let ty_span = Span { offset: self.offset + leading + name, size: ty };
-        self.entry.ty().map(|t| Spanned(ty_span, t))
+    pub(crate) fn ty(&self) -> Option<SpannedIdent<'a>> {
+        let leading = self.entry.leading_len();
+        let name = self.entry.name_len();
+        let ident = self.entry.ty()?;
+        Some(SpannedIdent { offset: self.offset + leading + name + 1, ident })
     }
     pub(crate) fn span(&self) -> Span {
         Span { offset: self.offset, size: self.entry.size() }
     }
 }
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct SpannedDocument<'a> {
-    document: &'a KdlDocument,
-    span: Span,
-    before_nodes: u32,
-}
-impl<'a> SpannedDocument<'a> {
-    pub(crate) fn new(document: &'a KdlDocument, offset: u32) -> Self {
-        let size = document.len() as u32;
-        let before_nodes = document.leading().size();
-        let span = Span { offset, size };
-        Self { span, document, before_nodes }
-    }
-    pub(crate) fn nodes(&self) -> impl Iterator<Item = SpannedNode<'a>> {
-        let offset = self.before_nodes + self.span.offset;
-        let nodes = self.document.nodes().iter().scan(offset, |offset, n| {
-            let ret = Some(SpannedNode::new(n, *offset));
-            *offset += n.size();
-            ret
-        });
-        nodes
-    }
-    pub(crate) fn node_count(&self) -> usize {
-        self.document.nodes().len()
-    }
-}
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct SpannedNode<'a> {
-    node: &'a KdlNode,
-    sizes: NodeSizes,
+
+#[derive(Clone, Debug)]
+pub(crate) struct SpannedDocument {
+    doc: Marc<[KdlNode]>,
     offset: u32,
 }
-impl<'a> SpannedNode<'a> {
-    pub(crate) fn new(node: &'a KdlNode, offset: u32) -> Self {
-        let sizes = node.sizes();
-        Self { sizes, node, offset }
+impl SpannedDocument {
+    pub(crate) fn new(mut doc: KdlDocument) -> Self {
+        let nodes = std::mem::take(doc.nodes_mut());
+        Self { offset: doc.leading().size(), doc: nodes.into() }
     }
-    pub(crate) fn ty(&self) -> Option<Spanned<&'a KdlIdentifier>> {
-        let offset = self.offset + self.sizes.leading + 1;
-        let span = Span { offset, size: self.sizes.ty };
-        self.node.ty().map(|ty| Spanned(span, ty))
+    pub(crate) fn node_count(&self) -> usize {
+        self.doc.len()
     }
-    pub(crate) fn name(&self) -> Spanned<&'a KdlIdentifier> {
-        let NodeSizes { leading, ty, name, .. } = self.sizes;
-        let name_span = Span { offset: self.offset + leading + ty, size: name };
-        let name = self.node.name();
-        Spanned(name_span, name)
+    pub(crate) fn nodes(&self) -> impl Iterator<Item = SpannedNode> {
+        let mut i = 0;
+        let mut offset = self.offset;
+        let doc = self.doc.clone();
+        std::iter::from_fn(move || {
+            let node = Marc::try_map(doc.clone(), |nodes| nodes.get(i)).ok()?;
+            let new_offset = offset + node.leading().size() + node.full_len();
+            let result = SpannedNode { node, offset };
+            offset = new_offset;
+            i += 1;
+            Some(result)
+        })
     }
-    pub(crate) fn entries(&self) -> impl Iterator<Item = SpannedEntry<'a>> {
-        let NodeSizes { leading, ty, name, .. } = self.sizes;
-        let offset = self.offset + leading + ty + name;
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SpannedNode {
+    node: Marc<KdlNode>,
+    offset: u32,
+}
+impl SpannedNode {
+    pub(crate) fn ty(&self) -> Option<SpannedIdent> {
+        Some(SpannedIdent { offset: self.offset + 1, ident: self.node.ty()? })
+    }
+    pub(crate) fn name(&self) -> SpannedIdent {
+        SpannedIdent {
+            offset: self.offset + self.node.ty_len(),
+            ident: self.node.name(),
+        }
+    }
+    pub(crate) fn entries(&self) -> impl Iterator<Item = SpannedEntry> {
+        let ty = self.node.ty_len();
+        let name = self.node.name_len();
+        let offset = self.offset + ty + name;
         let entries = self.node.entries().iter().scan(offset, |offset, e| {
             let cur_offset = *offset;
             *offset += e.size();
@@ -234,22 +267,41 @@ impl<'a> SpannedNode<'a> {
         });
         entries
     }
-    pub(crate) fn children(&self) -> Option<SpannedDocument<'a>> {
-        let NodeSizes { leading, ty, name, entries, .. } = self.sizes;
-        let offset = self.offset + leading + ty + name + entries;
-        self.node
-            .children()
-            .map(|n| SpannedDocument::new(n, offset))
+    pub(crate) fn children(&self) -> Option<SpannedDocument> {
+        let ty = self.node.ty_len();
+        let name = self.node.name_len();
+        let entries = self.node.entries_len();
+        let offset = self.offset + ty + name + entries;
+        Marc::try_map(self.node.clone(), |n| n.children())
+            .ok()
+            .map(|doc| SpannedDocument {
+                offset: offset + doc.leading().size(),
+                doc: Marc::map(doc, |d| d.nodes()),
+            })
+    }
+    pub(crate) fn fields(&self) -> impl Iterator<Item = (Option<&str>, Option<&KdlValue>)> {
+        let entries = self
+            .entries()
+            .map(|e| (e.name().map(|e| e.value()), Some(e.value().1)));
+        let children = self.node.children().into_iter();
+        let nodes = children.flat_map(|c| c.nodes()).map(|n| {
+            let value = n.entries().first().map(|v| v.value());
+            (Some(n.name().value()), value)
+        });
+        entries.chain(nodes)
     }
     pub(crate) fn span(&self) -> Span {
-        let NodeSizes { leading, ty, name, entries, children } = self.sizes;
+        let ty = self.node.ty_len();
+        let name = self.node.name_len();
+        let entries = self.node.entries_len();
+        let children = self.node.children_len();
         Span {
-            offset: self.offset + leading,
+            offset: self.offset,
             size: ty + name + entries + children,
         }
     }
 }
-impl<'a> fmt::Display for SpannedNode<'a> {
+impl<'a> fmt::Display for SpannedNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.node)
     }

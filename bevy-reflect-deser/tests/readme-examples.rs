@@ -105,7 +105,7 @@ fn assert_all_lines_eq_kdl<T: FromReflect + PartialEq + fmt::Debug + Typed>(
     println!("in section {section_no}");
     for (i, line) in text.lines().enumerate() {
         println!("########### line {i} ###############\n---------------------");
-        let converted = from_doc::<T>(&line.parse().unwrap(), &reg)
+        let converted = from_doc::<T>(line.parse().unwrap(), &reg)
             .map(|val| T::from_reflect(val.as_ref()).unwrap())?;
         assert_eq!(&converted, value, "in {line}");
     }
@@ -119,7 +119,7 @@ fn assert_eq_kdl<T: FromReflect + PartialEq + fmt::Debug>(
     reg: &TypeRegistry,
 ) -> Result<(), ConvertErrors> {
     println!("in section {section_no}");
-    let converted = convert_doc(&text.parse().unwrap(), &reg)
+    let converted = convert_doc(text.parse().unwrap(), &reg)
         .map(|val| T::from_reflect(val.as_ref()).unwrap())?;
     assert_eq!(&converted, value, "in {text}");
     Ok(())
@@ -131,7 +131,7 @@ fn assert_fails_kdl<T: FromReflect + fmt::Debug + Any>(
 ) -> Result<(), ConvertErrors> {
     println!("in section {section_no}");
     let converted =
-        convert_doc(&text.parse().unwrap(), &reg).map(|val| T::from_reflect(val.as_ref()));
+        convert_doc(text.parse().unwrap(), &reg).map(|val| T::from_reflect(val.as_ref()));
 
     assert!(
         converted.is_err(),

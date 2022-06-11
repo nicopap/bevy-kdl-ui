@@ -10,6 +10,7 @@ use kdl::KdlValue;
 use template_kdl::{
     multi_err::{MultiError, MultiErrorTrait},
     span::Spanned,
+    template::Field,
 };
 
 use crate::{
@@ -18,33 +19,35 @@ use crate::{
     ConvertResult, DynRefl,
 };
 
-pub fn convert_doc(doc: &KdlDocument, registry: &TypeRegistry) -> ConvertResult<DynRefl> {
+pub fn convert_doc(doc: KdlDocument, registry: &TypeRegistry) -> ConvertResult<DynRefl> {
     let mut errors = MultiError::default();
     let doc_repr = doc.to_string();
     let template_map = |err: Spanned<_>| err.map(ConvertError::Template);
-    if let Some(doc) = errors.optionally(template_kdl::read_document(doc).map_err(template_map)) {
-        let Spanned(name_span, name) = doc.ty().unwrap_or_else(|| doc.name());
-        let expected = type_info(registry, Some(name), None).map_err_span(name_span);
+    if let Some(node) = errors.optionally(template_kdl::read_thunk(doc).map_err(template_map)) {
+        let name = node.ty().unwrap_or_else(|| node.name());
+        let name_span = name.span();
+        let expected = type_info(registry, Some(name.value()), None).map_err_span(name_span);
         expected
             .combine(errors)
-            .and_then(|e| e.into_dyn(doc.into(), registry))
+            .and_then(|e| e.into_dyn(&node, registry))
             .into_result()
             .map_err(|e| ConvertErrors::new(doc_repr, e))
     } else {
         Err(ConvertErrors::new(doc_repr, errors.errors().to_vec()))
     }
 }
-pub fn from_doc<T: Typed>(doc: &KdlDocument, registry: &TypeRegistry) -> ConvertResult<DynRefl> {
+pub fn from_doc<T: Typed>(doc: KdlDocument, registry: &TypeRegistry) -> ConvertResult<DynRefl> {
     let mut errors = MultiError::default();
     let doc_repr = doc.to_string();
     let template_map = |err: Spanned<_>| err.map(ConvertError::Template);
-    if let Some(doc) = errors.optionally(template_kdl::read_document(doc).map_err(template_map)) {
+    if let Some(node) = errors.optionally(template_kdl::read_thunk(doc).map_err(template_map)) {
         let expected = Some(T::type_info().type_name());
-        let Spanned(name_span, _) = doc.ty().unwrap_or_else(|| doc.name());
+        let name = node.ty().unwrap_or_else(|| node.name());
+        let name_span = name.span();
         let expected = type_info(registry, None, expected).map_err_span(name_span);
         expected
             .combine(errors)
-            .and_then(|e| e.into_dyn(doc.into(), registry))
+            .and_then(|e| e.into_dyn(&node, registry))
             .into_result()
             .map_err(|e| ConvertErrors::new(doc_repr, e))
     } else {

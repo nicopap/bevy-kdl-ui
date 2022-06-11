@@ -18,6 +18,24 @@ the n/d/e span in `Declaration`.
 
 How? Forget it for now.
 
+Update: now is the time to think about it.
+
+So I have an initial owned `KdlDocument`. But all the '*Thunk' stuff hold
+references, because it only visits the 'KdlDocument' when consumed.
+
+Alternatives:
+1. Clone everything and keep ownership all the time
+2. Add `Arc`s everywhere.
+
+(1) is not memory-performant and seems generally wastefull. (2) Is actually
+impossible, because you still need ownership of the value to create the `Arc`.
+A workaround would be to do a "pre-processing" pass that converts the
+`KdlDocument` and its node to a proxy struct that holds `Arc` to the values
+rather than the value itself. But this is complex and adds a lot of code.
+
+After some research, I found `mappable-rc` which seems to enable creating
+projections of `Arc`s to fields of a struct which is exaclty what I need.
+
 ### Create a `Deserializer` that encapsulates completely parsing
 
 We want to minimize the API surface, so that the end user ideally doesn't have
@@ -42,7 +60,7 @@ the visitor.
 
 The [serde data model] is very different from the kdl one. I however still want
 to keep more or less the same walking system. How do other crates do it?
-* [serde_kdl][serde_kdl]: copes out completely, basically doing what bevy_proto
+* [serde_kdl]: copes out completely, basically doing what bevy_proto
   does, see [serde_kdl doc].
 * [knuffel]: Gives up entirely, the macros specifically asks the user which
   fields of a struct should represent what in the kdl file.
@@ -59,6 +77,54 @@ options:
 * Remove `DocumentThunk` from public API by having `children` return
   nodes.
 
+### Recursive behavior
+
+So we artifically prevent recursive calls by storing a `binding_index`. But why?
+Well, currently it's impossible to have terminal conditions, so it's better to
+make it hard to make recursion, since all forms of recursion would be infinite.
+
+### Better Span API
+
+Issue: currently, `Span` is very annoying and difficult to deal with, goes into
+pattern matching, requires mapping over, etc. How could we smooth it out?
+
+* special `map`, `flat_map` etc. that transparently handle `Span` when it's inside
+  `Result`, `MultiResult` and `Option`.
+* Instead of having `Spanned` be a wrapper struct, have it be a `trait`, so that it
+  doesn't poison the types
+
+### Foreign definitions API (or "Scopes")
+
+We want:
+* Ability to refer to user-provided or `export`-returned templates
+* For those templates to be able to refer to their local scope without
+  interference from templates defined somewhere else.
+  
+Now that we have mappable-rc, we can simply create a `Marc` over the subslice
+of bindings we need in `Context`, rather than storing an indice.
+
+We'd also love to make the foreign definitions blend with the local ones, so
+that it's easier to manage.
+
+We'd like for a sort of "dependency graph" so that it's possible to dynamically
+reload the proper templates and scenes.
+
+### Binding list issue again
+
+I tried to use a `Arc<[Binding]>` or 'Marc<[Binding]>' for the binding list, but
+it wouldn't do it. Issue is that it required each `Binding` to have a reference
+to the list itself in which it is. Even if all I really want is just a reference
+to the subslice that of bindings just before this one.
+
+I opted to make a linked list of `Binding` Where `Binding` is a node, and has a
+`bindings: Option<Arc<Binding>>` (aliased to 'OtherBindings'). This simplifies
+implementation, because the bindings are fully associated with the thunks, and
+I don't have to keep around (and in sync) a context to interpret the templates.
+
+However, when performance is an issue, I should switch to using, for one, a
+string interner instead of a bunch of `Marc<str>`, and for two using a context
+where bindings are not strings but rather indices into the context, which would
+supposedly store the bindings in contiguous memory.
 
 ## bevy-reflect-deser
 
@@ -249,7 +315,6 @@ but accumulates errors in the `MultiResult`.
 anything. And `dyn_wrapper::type_info` should be able to correctly the case where
 we tell it to not expect anything: it's not an error to not expect anything if we
 could deduce the type from the `declared` argument.
-
 
 
 [serde data model]: https://serde.rs/data-model.html

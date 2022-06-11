@@ -102,7 +102,7 @@ fn main() -> Result<()> {
     );
     for def in KDL_DEFS {
         let doc = def.parse().unwrap();
-        let reflect = convert_doc(&doc, &reg)?;
+        let reflect = convert_doc(doc, &reg)?;
         if let Some(m) = Newtype::from_reflect(reflect.as_ref()) {
             println!("Netype: {m:?}");
         } else if let Some(m) = NumberContainer::from_reflect(reflect.as_ref()) {

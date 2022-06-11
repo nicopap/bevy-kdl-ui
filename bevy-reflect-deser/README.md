@@ -12,8 +12,8 @@ Features:
 * Parses `Box<dyn Reflect>`.
 * Resilient parsing to accumulate errors rather than bailing at the first error.
 * Strong typing guarentees.
-* Powerfull error reporting with actionable tips, useful context and precise
-  source code spans.
+* Powerfull error reporting with actionable tips, useful context and source code
+  spans.
 * Type-driven format, enables very powerful shortcuts in deserialization.
 
 ## Getting Started

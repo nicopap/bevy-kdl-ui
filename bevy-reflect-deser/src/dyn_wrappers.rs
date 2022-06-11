@@ -9,7 +9,7 @@ use template_kdl::{
     multi_err::{MultiError, MultiErrorTrait, MultiResult},
     multi_try,
     span::Spanned,
-    template::{FieldThunk, NodeThunk},
+    template::{Field, NodeThunk, ValueExt},
 };
 
 use crate::{
@@ -141,10 +141,18 @@ impl Builder for PairMapBuilder {
         Self(DynamicMap::default(), expected.clone())
     }
 
-    fn add_field(&mut self, field: FieldThunk, reg: &TypeRegistry) -> MultiSpan<()> {
+    fn add_field(&mut self, field: &dyn Field, reg: &TypeRegistry) -> MultiSpan<()> {
         let mut errors = MultiError::default();
-        if let Some((key, value)) = field.pair() {
-            let span = field.span;
+        let fields = field.field_value();
+        let keyvalue = match &fields {
+            ValueExt::Value(_) => None,
+            ValueExt::Node(n) => {
+                let mut fields = n.fields();
+                fields.next().zip(fields.next())
+            }
+        };
+        if let Some((key, value)) = keyvalue {
+            let span = field.span();
             let key_expected = multi_try!(
                 errors,
                 type_info(reg, None, Some(self.1.key_type_name())).map_err_span(span)
@@ -153,12 +161,12 @@ impl Builder for PairMapBuilder {
                 errors,
                 type_info(reg, None, Some(self.1.value_type_name())).map_err_span(span)
             );
-            let key = multi_try!(errors, key_expected.into_dyn(key, reg));
-            let value = multi_try!(errors, value_expected.into_dyn(value, reg));
+            let key = multi_try!(errors, key_expected.into_dyn(&*key, reg));
+            let value = multi_try!(errors, value_expected.into_dyn(&*value, reg));
             self.0.insert_boxed(key, value);
             errors.into_result(())
         } else {
-            let err = Spanned(field.span, ConvertError::TupleMapDeclarationMixup);
+            let err = Spanned(field.span(), ConvertError::TupleMapDeclarationMixup);
             errors.into_errors(err)
         }
     }
@@ -254,10 +262,12 @@ impl Builder for AnonTupleBuilder {
         Self(DynamicTuple::default())
     }
 
-    fn add_field(&mut self, field: FieldThunk, reg: &TypeRegistry) -> MultiSpan<()> {
+    fn add_field(&mut self, field: &dyn Field, reg: &TypeRegistry) -> MultiSpan<()> {
         let mut errors = MultiError::default();
-        if let Some(Spanned(ty_span, ty_name)) = field.ty.or(field.name) {
-            let declared = get_named(ty_name.value(), reg).map_err(|e| Spanned(ty_span, e));
+        if let Some(ty) = field.ty().or(field.field_name()) {
+            let ty_name = ty.value();
+            let ty_span = ty.span();
+            let declared = get_named(ty_name, reg).map_err(|e| Spanned(ty_span, e));
             let declared = multi_try!(errors, declared);
             let try_ty = type_info(reg, None, Some(declared.type_name())).map_err_span(ty_span);
             let ty = multi_try!(errors, try_ty);
@@ -265,7 +275,7 @@ impl Builder for AnonTupleBuilder {
             self.0.insert_boxed(value);
             MultiResult::Ok(())
         } else {
-            let with_span = |e| Spanned(field.span, e);
+            let with_span = |e| Spanned(field.span(), e);
             MultiResult::Err(vec![with_span(ConvertError::UntypedTupleField)])
         }
     }
@@ -423,7 +433,7 @@ impl Primitive for DynamicTupleStruct {
 pub(crate) trait Builder: Sized {
     type Info: Infos;
     fn new(expected: &Self::Info) -> Self;
-    fn add_field(&mut self, field: FieldThunk, reg: &TypeRegistry) -> MultiSpan<()>;
+    fn add_field(&mut self, field: &dyn Field, reg: &TypeRegistry) -> MultiSpan<()>;
     fn complete(self) -> MultiResult<DynRefl, ConvertError>;
     fn new_dynamic(
         expected: &Self::Info,
@@ -433,7 +443,7 @@ pub(crate) trait Builder: Sized {
         let mut errors = MultiError::default();
         let mut builder = Self::new(expected);
         for field in node.fields() {
-            let _ = errors.optionally(builder.add_field(field, reg));
+            let _ = errors.optionally(builder.add_field(&*field, reg));
         }
         builder.complete().map_err_span(node.span()).combine(errors)
     }
@@ -444,7 +454,7 @@ impl Builder for ValueBuilder {
     fn new(_: &Self::Info) -> Self {
         unreachable!("This should never be called")
     }
-    fn add_field(&mut self, _: FieldThunk, _: &TypeRegistry) -> MultiSpan<()> {
+    fn add_field(&mut self, _: &dyn Field, _: &TypeRegistry) -> MultiSpan<()> {
         unreachable!("This should never be called")
     }
     fn complete(self) -> MultiResult<DynRefl, ConvertError> {
@@ -486,15 +496,15 @@ where
         acc.set_name(expected.name().to_owned());
         Self { acc, info: expected.clone(), _f: PhantomData }
     }
-    fn add_field(&mut self, field: FieldThunk, reg: &TypeRegistry) -> MultiSpan<()> {
+    fn add_field(&mut self, field: &dyn Field, reg: &TypeRegistry) -> MultiSpan<()> {
         let mut errors = MultiError::default();
-        let opt_ty = field.ty.or(field.name);
+        let opt_ty = field.ty().or(field.field_name());
         // In case we have a name or declared type, we use their span for the type
         // error. Otherwise, we use the whole thunk's span.
-        let ty_span = opt_ty.map_or_else(|| field.span, |t| t.0);
+        let ty_span = opt_ty.map_or_else(|| field.span(), |t| t.span());
         let expected = self.acc.expected(&(), &self.info);
         let expected = errors.optionally(expected.map_err(|e| Spanned(ty_span, e)));
-        let try_ty = type_info(reg, opt_ty.map(|t| t.1.value()), expected).map_err_span(ty_span);
+        let try_ty = type_info(reg, opt_ty.map(|t| t.value()), expected).map_err_span(ty_span);
         let ty = multi_try!(errors, try_ty);
         let value = multi_try!(errors, ty.into_dyn(field, reg));
         if let Err(err) = self.acc.add_boxed((), value) {
@@ -514,31 +524,31 @@ where
     T::Info: Clone,
 {
     type Info = T::Info;
-    fn new(expected: &T::Info) -> Self {
+    fn new(expected: &Self::Info) -> Self {
         let mut acc = T::from_info(expected);
         acc.set_name(expected.name().to_owned());
         Self { acc, info: expected.clone(), _f: PhantomData }
     }
-    fn add_field(&mut self, field: FieldThunk, reg: &TypeRegistry) -> MultiSpan<()> {
+    fn add_field(&mut self, field: &dyn Field, reg: &TypeRegistry) -> MultiSpan<()> {
         let mut errors = MultiError::default();
-        if let Some(name) = field.name {
-            let expected = |n: &str| self.acc.expected(&n.to_owned(), &self.info);
-            let expected = name.map(|n| n.value()).map_err(expected);
-            let expected = errors.optionally(expected);
-            let opt_ty = field.ty;
+        if let Some(name) = field.field_name() {
+            let field_name = name.value();
+            let expected_ty = self.acc.expected(&field_name.to_owned(), &self.info);
+            let expected_ty = expected_ty.map_err(|e| Spanned(name.span(), e));
+            let expected = errors.optionally(expected_ty);
+            let opt_ty = field.ty();
             // In case we have a declared type, we use their span for the type
             // error. Otherwise, we use the name (which incidentally is required)
-            let ty_span = opt_ty.map_or(name.0, |t| t.0);
-            let try_ty =
-                type_info(reg, opt_ty.map(|t| t.1.value()), expected).map_err_span(ty_span);
+            let ty_span = opt_ty.map_or(name.span(), |t| t.span());
+            let try_ty = type_info(reg, opt_ty.map(|t| t.value()), expected).map_err_span(ty_span);
             let ty = multi_try!(errors, try_ty);
             let value = multi_try!(errors, ty.into_dyn(field, reg));
-            if let Err(err) = self.acc.add_boxed(name.1.value().to_owned(), value) {
+            if let Err(err) = self.acc.add_boxed(name.value().to_owned(), value) {
                 errors.add_error(Spanned(ty_span, err));
             }
         } else {
             let err = ConvertError::UnnamedMapField { name: self.info.name() };
-            errors.add_error(Spanned(field.span, err));
+            errors.add_error(Spanned(field.span(), err));
         }
         errors.into_result(())
     }

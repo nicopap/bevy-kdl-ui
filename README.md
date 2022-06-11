@@ -45,14 +45,12 @@ See the relevant sections in the respective crate READMEs.
 - [X] proper span-based error reporting
 - [X] Spanned smart pointer that forces updating offset when accessing a Kdl type
 - [X] Implment newtype unwrapping for compound types
-- [ ] Refactor
+- [X] Refactor
   - [X] `fns` => `template`
   - [X] Make sure the documentation reflects the actual syntax
   - [X] `Call*` => `*Thunk`
   - [X] Formalize and document difference between `Context` and `Bindings`
   - [X] Rename `Bindings`
-  - [ ] Remove dependency on pointers, own shit so that it might be possible
-        to use multiple files
 - [X] Resolve the "variable scopping" problem.
 - [X] Document `fns` (mostly copy the section on top here)
 - [X] `deser`: Implement all documented features that are currently commented-out in
@@ -60,11 +58,7 @@ See the relevant sections in the respective crate READMEs.
   - [X] Anonymous tuples
   - [X] Struct with named field but not named in kdl file
   - [X] Hashmap tuple form
-- [ ] Deduplicate similar errors
-- [ ] Add context to field errors (encompassing struct, alternative possible names etc.)
-- [ ] Error handling in `template-kdl`
 - [X] Migrate `NodeThunkExt` to `template-kdl`
-- [ ] Use the `NodeThunkExt` API to create a `kdl-serde`
 - [X] FIX error message for too many fields in tupleStruct
 - [X] FIX that we accept .N="foo" where N is out of bound for tupleStruct
       (actually removed the feature)
@@ -74,35 +68,65 @@ See the relevant sections in the respective crate READMEs.
 - [X] detect and parse `fn` nodes
 - [X] Expand `fn` nodes in the last node of file
 - [X] Expand `fn` nodes in other nodes
-- [ ] `deser`: do not store type names as string, rather just the TypeId. And
-      get back the string when building the final `ConvResults`
 - [X] Actually use invocation arguments in `fn` expension
 - [X] Make all `template-kdl` examples pass
 - [X] `expand` meta-node
-- [ ] add a `bundle` node so that it's possible to define multiple
-      components at a time
 - [X] Formalize and list the bevy-reflect-deser format.
 - [X] Add the README example in bevy-reflect-deser to rustdoc.
-- [ ] rename `dyn_wrappers` in bevy-reflect-deser
-- [ ] ?? Make bevy-reflect-deser independent from tempalte-kdl
 - [X] ?? Consider using "field:" instead of ".field" for performance (easier to remove from
       the end than the start) (now it uses plain name)
-- [ ] ?? Consider having a generic template parser rather than one that depends on Kdl
-      it would just wrap another Deserializer. => Check [design decision]
 - [X] Fix broken links in READMEs
 - [X] Spaces and non-string map keys
-- [ ] Add "kdl markers" to nodes spawned, so that it might be eventually
-      possible to round-trip the world, for 
-- [ ] Read and add to assets the last node in the kdl file
-- [ ] Check for `Added<Handle<Cuddly>>` and add scene
 - [X] ?? Enable usage of kdl type specifiers and checking against expected values
-- [ ] ?? type-directed field assignment (arbitrary ordering of fields in kdl file
-  as long as it is possible to guess to which field a node element belongs based
-  on either field name or type)
 - [X] ?? Non-String Map access.
-- [ ] ?? Handle Enum
+- [ ] Add a `if_equal foo bar` template built-in.
+- [ ] bevy-kdl-scene features:
+  - [X] in teplate-kdl: remove dependency on pointers, own shit so that it might be
+    possible to use templates in a concurrent context. (see [arc-decision])
+    - [X] Requires migrating to `Arc` everything instead of storing references. 
+  - [X] Update template-kdl to return an alternative between `Vec<Definition>` and
+    `NodeThunk` when parsing a file
+  - [X] Add name rebinding to `export`
+  - [X] Update template-kdl to accept a list of template definitions to parse a file with.
+  - [ ] add a `components` node so that it's possible to define multiple
+        components at a time
+  - [ ] Add "kdl markers" to nodes spawned, so that it might be eventually
+        possible to round-trip the world
+  - [ ] Read and add to assets the last node in the kdl file
+  - [ ] Check for `Added<Handle<Cuddly>>` and add scene
+- [ ] Proper error reporting and handling
+  - [ ] Error handling in `template-kdl`
+  - [ ] Deduplicate similar errors in `bevy-reflect-deser`
+  - [ ] Add context to field errors (encompassing struct, alternative possible names etc.)
+- [ ] Refactoring
+  - [ ] !! Implement a "serde-like" API on top of NodeThunk, because I bet I can clean up
+        thousandfold the `bevy-reflect-deser` crate if I expose the right API.
+  - [X] Remove `EntrySizes` and `NodeSizes`, since the string len op is pratically identical
+        to looking up a u32.
+  - [ ] Use a context with interner & slotmap for definitions in template-kdl rather than
+        stash everything in a thunk (for performance)
+  - [ ] Flatten the many different binding tables
+  - [ ] Have a `SpannedValue` that replaces the clone-heavy 'Spanned<KdlValue>'
+  - [ ] Use a string interner for `template-kdl`
+  - [ ] Rename `FooThunk` to `Foo` in `template-kdl`
+  - [ ] rename `dyn_wrappers` in `bevy-reflect-deser`
+  - [ ] Move `MultiResult` into its own crate.
+  - [ ] Redesign Span and MutliResult to have a smoother API (maybe use a trait)
+  - [ ] `deser`: do not store type names as string, rather just the TypeId. And
+        get back the string when building the final `ConvResults`
+- [ ] ?? Things to consider but might not be implemented.
+  - [ ] ?? Recursive `template-kdl` by removing `binding_index` field from `Binding` struct
+  - [ ] ?? type-directed field assignment (arbitrary ordering of fields in kdl file
+        as long as it is possible to guess to which field a node element belongs based
+        on either field name or type)
+  - [ ] ?? Consider having a generic template parser rather than one that depends on Kdl
+        it would just wrap another Deserializer. => Check [design decision][deser-decision]
+  - [ ] ?? Make bevy-reflect-deser independent from tempalte-kdl
+  - [ ] ?? Use the `NodeThunkExt` API to create a `kdl-serde`
+- [ ] ?? Handle Enum (waiting on https://github.com/bevyengine/bevy/pull/4761)
 
-[design-decision]: ./dev-resources/decisions#create-a-deserializer-that-encapsulates-completely-parsing
+[arc-decision]: ./dev-resources/decisions#user-declared-list-of-additional-declarations
+[deser-decision]: ./dev-resources/decisions#create-a-deserializer-that-encapsulates-completely-parsing
 
 ## Why
 

@@ -4,5 +4,5 @@ resolver = "2"
 
 
 [patch.crates-io]
-bevy_reflect = { git = "https://github.com/MrGVSV/bevy.git", branch="reflect-type-info"}
-bevy_utils = { git = "https://github.com/MrGVSV/bevy.git", branch="reflect-type-info"}
+bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", branch="main"}
+bevy_utils = { git = "https://github.com/bevyengine/bevy.git", branch="main"}

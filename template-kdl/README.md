@@ -1,8 +1,8 @@
 # Template kdl
 
-A serialization format piggy-backing on kdl, adding a
-powerful yet minimalist template expension system. The API provides spans
-to attribute nodes to their proper position in the source reader.
+A serialization format piggy-backing on kdl, adding a powerful yet minimalist
+template expension system. The API provides spans to attribute nodes to their
+proper position in the source reader.
 
 ## Getting started
 
@@ -403,6 +403,55 @@ LastNodeInFile {
     Info weight=40.0 volume=4.0
   }
 }
+```
+
+### `export` node
+
+If you want a kdl file to not just represent a single node, but rather a set
+of macros you can re-use in other files. Name the last node in the file `export`.
+
+```kdl
+my-favorite-washing-machine "detergent" {
+  expand "metadata" {
+      Manifacturer brand="Bosch" country="Germany"
+      Info weight=40.0 volume=4.0
+  }
+  WashingMachine noise_db=4.0 loading="Front" {
+    Origin continent="Asia" country="China"
+    detergent
+    expand "metadata"
+  }
+}
+simple-washing-machine {
+  WashingMachine noise_db=2.0 loading="Front" {
+    Origin continent="Asia" country="China"
+    Manifacturer brand="Miele" country="Germany"
+  }
+}
+export {
+  my-favorite-washing-machine
+  simple-washing-machine
+}
+```
+
+It's also possible to use entries:
+```kdl
+export "my-favorite-washing-machine" "simple-washing-machine"
+```
+
+You can also rename the templates you export.
+
+```kdl
+export {
+  my-favorite "my-favorite-washing-machine"
+  simple "simple-washing-machine"
+}
+```
+
+With entries:
+
+```kdl
+export my-favorite="my-favorite-washing-machine" simple="simple-washing-machine"
 ```
 
 ### Rust API

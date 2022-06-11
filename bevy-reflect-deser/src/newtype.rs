@@ -6,7 +6,7 @@ use bevy_reflect::{
 use template_kdl::{
     multi_err::MultiResult,
     span::Spanned,
-    template::{FieldThunk, ValueExt},
+    template::{Field, ValueExt},
 };
 
 use crate::{
@@ -57,12 +57,12 @@ impl<'r> ExpectedType<'r> {
     // for each level of nest, we visit all inner nests one more time.
     pub(crate) fn into_dyn(
         self,
-        field: FieldThunk,
+        field: &dyn Field,
         reg: &'r TypeRegistry,
     ) -> MultiResult<DynRefl, Spanned<ConvertError>> {
         use MultiResult::Ok as MultiOk;
         if self.tys.is_empty() {
-            return into_dyn(&field.value, None, reg);
+            return into_dyn(&field.field_value(), None, reg);
         }
         // build the whole type from the most inner type. The most inner type is the last
         // of the `tys` array. The goal is to build a `foo` which is the most outer type
@@ -72,7 +72,7 @@ impl<'r> ExpectedType<'r> {
         let mut tys = self.tys.into_iter().rev();
         // unwrap: only constructor has at least one element to tys
         let first = tys.next().unwrap();
-        let mut inner = into_dyn(&field.value, Some(first), reg);
+        let mut inner = into_dyn(&field.field_value(), Some(first), reg);
         for ty in tys {
             match (&mut inner, ty) {
                 (MultiOk(ref mut inner), TypeInfo::Struct(info)) => {
@@ -98,7 +98,7 @@ impl<'r> ExpectedType<'r> {
                     *inner = Box::new(acc);
                 }
                 _ => {
-                    inner = into_dyn(&field.value, Some(ty), reg);
+                    inner = into_dyn(&field.field_value(), Some(ty), reg);
                 }
             }
         }

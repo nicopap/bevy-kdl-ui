@@ -10,6 +10,8 @@ pub enum Error {
     NoBody,
     #[error("The input is not properly formatted KDL: {0}")]
     Kdl(#[from] kdl::KdlError),
+    #[error("The input to `read_thunk`, is specifically `export`, which is not a thunk")]
+    NotThunk,
     #[error("The provided KdlDocument is empty")]
     Empty,
 }

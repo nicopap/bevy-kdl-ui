@@ -106,7 +106,7 @@ mod test {
         );
         register_more!((i128, f32, String, f32, u32), Option<u8>, Vec<String>, HashMap<String, f32>);
         let mut document: KdlDocument = text.parse().unwrap();
-        convert_doc(&document, &registry).map(|val| T::from_reflect(val.as_ref()).unwrap())
+        convert_doc(document, &registry).map(|val| T::from_reflect(val.as_ref()).unwrap())
     }
     #[test]
     fn test_component() {
