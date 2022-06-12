@@ -1,8 +1,6 @@
 use std::iter::FromIterator;
 use std::mem;
 
-use crate::span::{Span, Spanned};
-
 // TODO(perf): it is probably more efficient to use a im::Vector here instead
 // of Vec.
 
@@ -72,23 +70,6 @@ pub trait MultiErrorTrait {
         iter.map(MultiResult::from)
             .filter_map(|t| self.optionally(t))
             .collect()
-    }
-    // TODO: naming
-    // (Span t, t -> Res u e) -> u
-    fn process<T, U, E, F>(&mut self, span: Spanned<T>, f: F) -> U
-    where
-        U: Default,
-        Spanned<E>: Into<Self::Error>,
-        F: FnOnce(T) -> Result<U, E>,
-    {
-        let Spanned(span, t) = span;
-        match f(t) {
-            Ok(ok) => ok,
-            Err(err) => {
-                self.add_error(Spanned(span, err));
-                U::default()
-            }
-        }
     }
     fn optionally<R: Into<MultiResult<T, Self::Error>>, T>(&mut self, res: R) -> Option<T> {
         match res.into() {
@@ -167,9 +148,6 @@ impl<T, E> MultiResult<T, E> {
                 MultiResult::Err(errs)
             }
         }
-    }
-    pub fn map_err_span(self, span: Span) -> MultiResult<T, Spanned<E>> {
-        self.map_err(|e| Spanned(span, e))
     }
     pub fn combine(self, errors: MultiError<E>) -> Self {
         match self {

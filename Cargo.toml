@@ -1,5 +1,5 @@
 [workspace]
-members = ["bevy-reflect-deser", "template-kdl"]
+members = ["bevy-reflect-deser", "template-kdl", "multierr-span"]
 resolver = "2"
 
 

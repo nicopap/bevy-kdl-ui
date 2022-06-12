@@ -1,6 +1,8 @@
 mod bindings;
 pub mod err;
+mod field;
 pub mod multi_err;
+pub mod navigate;
 pub mod span;
 pub mod template;
 
@@ -9,9 +11,11 @@ use std::sync::Arc;
 use kdl::KdlDocument;
 
 use bindings::{Binding, Bindings as CrateBindings};
-use err::Error;
+use err::{Error, ErrorType};
+use mappable_rc::Marc;
 use multi_err::{MultiError, MultiErrorTrait, MultiResult};
-use span::{Span, Spanned, SpannedDocument, SpannedNode};
+use navigate::{Navigable, Value};
+use span::{SpannedDocument, SpannedNode};
 use template::NodeThunk;
 
 pub enum Document {
@@ -25,18 +29,27 @@ pub struct Bindings {
 impl Bindings {
     // TODO(ERR): error handling when name not found in bindings
     fn from_export(bindings: CrateBindings, scope_name: String, exposed: SpannedNode) -> Self {
-        let binding_names: Vec<_> = exposed
-            .fields()
-            .filter_map(|(name, value)| {
-                // TODO(ERR): wrong value declaration on export
-                let value = value.and_then(|v| v.as_string());
-                let from = value.and(name)?;
-                let to = name.and(value)?;
-                Some((from, to))
-            })
-            .collect();
-        let public_bindings = bindings.exports(scope_name, &binding_names);
-        Self { public_bindings }
+        if let Value::List(values) = exposed.value() {
+            let binding_names: Vec<_> = values
+                .filter_map(|field| {
+                    // TODO(ERR): wrong value declaration on export
+                    let name = field.name().map(|t| t.inner.value());
+                    let value = &field.value();
+                    let value = if let Value::Bare(kdl_value) = value {
+                        kdl_value.as_string()
+                    } else {
+                        None
+                    };
+                    let from = value.and(name)?;
+                    let to = name.and(value)?;
+                    Some((from.to_owned(), to.to_owned()))
+                })
+                .collect();
+            let public_bindings = bindings.exports(scope_name, &binding_names);
+            Self { public_bindings }
+        } else {
+            panic!()
+        }
     }
 }
 
@@ -44,13 +57,12 @@ pub fn read_document(
     document: KdlDocument,
     name: impl Into<String>,
     pre_bindings: Bindings,
-) -> MultiResult<Document, Spanned<Error>> {
-    let doc_len = document.len() as u32;
-    let doc = SpannedDocument::new(document);
+) -> MultiResult<Document, Error> {
+    let doc = SpannedDocument::new(Marc::new(document), 0);
     let mut errors = MultiError::default();
-    let node_count = doc.node_count();
+    let node_count = KdlDocument::nodes(&doc).len();
     if node_count == 0 {
-        let err = Spanned(Span { offset: 0, size: doc_len }, err::Error::Empty);
+        let err = Error::new(&doc, ErrorType::Empty);
         return errors.into_errors(err);
     }
     let mut all_nodes = doc.nodes();
@@ -70,13 +82,10 @@ pub fn read_document(
     }
 }
 
-pub fn read_thunk(document: KdlDocument) -> MultiResult<NodeThunk, Spanned<Error>> {
-    let doc_len = document.len() as u32;
+pub fn read_thunk(document: KdlDocument) -> MultiResult<NodeThunk, Error> {
+    let err = Error::new(&(&document, 0), ErrorType::NotThunk);
     read_document(document, "read_thunk", Default::default()).and_then(|doc| match doc {
-        Document::Exports(_) => MultiResult::Err(vec![Spanned(
-            Span { offset: 0, size: doc_len },
-            Error::NotThunk,
-        )]),
+        Document::Exports(_) => MultiResult::Err(vec![err]),
         Document::Node(node) => MultiResult::Ok(node),
     })
 }

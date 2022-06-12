@@ -10,6 +10,7 @@ version = "0.3.0"
 edition = "2021"
 
 [dependencies]
+multierr-span = { version = "0.3.0", features = ["kdl-impls", "mappable-rc-impls"], path = "../multierr-span"}
 thiserror = "1.0"
 kdl = "4.2"
 mappable-rc = "0.1.0"
