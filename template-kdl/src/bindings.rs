@@ -5,7 +5,7 @@ use mappable_rc::Marc;
 use crate::{
     err::Error,
     span::SpannedNode,
-    template::{Declaration, NodeThunk},
+    template::{Context, Declaration, NodeThunk},
 };
 
 #[derive(Debug, Clone)]
@@ -29,11 +29,11 @@ impl Bindings {
     }
     // TODO(ERR): error handling when name not found in bindings
     // TODO(PERF): Use `Cow` here
-    pub(crate) fn exports(self, scope_name: String, exposed: &[(String, String)]) -> Self {
+    pub(crate) fn exports(self, scope_name: String, exposed: &[(Marc<str>, String)]) -> Self {
         let expose_name = |binding_name: &str| {
             exposed
                 .iter()
-                .find_map(|(from, to)| (binding_name == *from).then(|| &*to))
+                .find_map(|(from, to)| (binding_name == &**from).then(|| &*to))
         };
         let exposed = self.visit().filter_map(|binding| {
             expose_name(binding.name.as_ref()).map(|new_name| Binding {
@@ -43,6 +43,9 @@ impl Bindings {
             })
         });
         Self::Exported(exposed.map(Arc::new).collect())
+    }
+    pub(crate) fn thunk(&self, body: SpannedNode) -> NodeThunk {
+        NodeThunk { body, context: Context::new(self.clone()) }
     }
 }
 

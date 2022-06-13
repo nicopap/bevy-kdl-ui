@@ -20,8 +20,8 @@ pub enum ErrorType {
 #[derive(Debug, Clone, thiserror::Error, PartialEq)]
 #[error("{source}")]
 pub struct Error {
-    source: ErrorType,
-    span: Span,
+    pub source: ErrorType,
+    pub span: Span,
 }
 impl Spanned for Error {
     fn span(&self) -> Span {
@@ -32,7 +32,8 @@ impl Error {
     pub(crate) fn new(span: &impl Spanned, source: ErrorType) -> Self {
         Self { source, span: span.span() }
     }
-
+}
+impl ErrorType {
     const NONSTR_PARAM: &'static str =
         "Template definition entries represent the tparameters of the template. \
 tparameters **must** have a name so that it's possible to refer to them in the \
@@ -43,7 +44,7 @@ for how to declare a template.";
         "A template definition must have a body. See how to use templates at \
 https://github.com/nicopap/bevy-kdl-ui/tree/main/template-kdl#value-templates";
     pub fn help(&self) -> Option<String> {
-        match self.source {
+        match self {
             ErrorType::NonstringParam(_) => Some(Self::NONSTR_PARAM.to_owned()),
             ErrorType::NoBody => Some(Self::NO_BODY.to_owned()),
             _ => None,

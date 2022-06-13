@@ -30,6 +30,11 @@ impl Span {
 pub trait Spanned {
     fn span(&self) -> Span;
 }
+impl Spanned for Span {
+    fn span(&self) -> Span {
+        *self
+    }
+}
 impl<T: Length> Spanned for (T, u32) {
     fn span(&self) -> Span {
         Span {
@@ -126,7 +131,7 @@ impl<T: ?Sized, B: Borrow<T>> Sbor<T, B> {
             _t: PhantomData,
         }
     }
-    pub fn map<U, C: Borrow<U>, F: FnOnce(B) -> C>(self, f: F) -> Sbor<U, C> {
+    pub fn map<U: ?Sized, C: Borrow<U>, F: FnOnce(B) -> C>(self, f: F) -> Sbor<U, C> {
         Sbor {
             inner: f(self.inner),
             offset: self.offset,

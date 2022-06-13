@@ -33,16 +33,16 @@ impl Bindings {
             let binding_names: Vec<_> = values
                 .filter_map(|field| {
                     // TODO(ERR): wrong value declaration on export
-                    let name = field.name().map(|t| t.inner.value());
+                    let name = field.name().map(|t| t.inner);
                     let value = &field.value();
                     let value = if let Value::Bare(kdl_value) = value {
                         kdl_value.as_string()
                     } else {
                         None
                     };
-                    let from = value.and(name)?;
+                    let from = value.and(name.clone())?;
                     let to = name.and(value)?;
-                    Some((from.to_owned(), to.to_owned()))
+                    Some((from, to.to_owned()))
                 })
                 .collect();
             let public_bindings = bindings.exports(scope_name, &binding_names);

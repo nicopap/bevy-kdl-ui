@@ -85,7 +85,11 @@ impl Length for KdlValue {
         }
     }
 }
-
+impl<'a> Sref<'a, KdlIdentifier> {
+    pub fn sref_str(self) -> Sref<'a, str> {
+        self.map(|t| t.value())
+    }
+}
 macro_rules! offset {
     // Compute lengths for offset
     (@length $sel:ident optional($before:expr, $after:expr, $_:ty) $method:ident) => (
