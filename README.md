@@ -96,7 +96,8 @@ See the relevant sections in the respective crate READMEs.
   - [ ] Check for `Added<Handle<Cuddly>>` and add scene
 - [ ] Proper error reporting and handling
   - [ ] Error handling in `template-kdl`
-  - [ ] Deduplicate similar errors in `bevy-reflect-deser`
+  - [ ] Deduplicate similar errors in `bevy-reflect-deser` (in
+        dyn_wrappers::Builder::new_dynamic)
   - [ ] Add context to field errors (encompassing struct, alternative possible names etc.)
 - [ ] Refactoring
   - [ ] !! Implement a "serde-like" API on top of NodeThunk, because I bet I can clean up
@@ -106,16 +107,16 @@ See the relevant sections in the respective crate READMEs.
   - [ ] Use a context with interner & slotmap for definitions in template-kdl rather than
         stash everything in a thunk (for performance)
   - [ ] Flatten the many different binding tables
-  - [ ] Have a `SpannedValue` that replaces the clone-heavy 'Spanned<KdlValue>'
+  - [X] Have a `SpannedValue` that replaces the clone-heavy 'Spanned<KdlValue>'
   - [ ] Use a string interner for `template-kdl`
-  - [ ] Rename `FooThunk` to `Foo` in `template-kdl`
+  - [X] Rename `FooThunk` to `Foo` in `template-kdl`
   - [ ] rename `dyn_wrappers` in `bevy-reflect-deser`
   - [ ] Move `MultiResult` into its own crate.
   - [ ] Redesign Span and MutliResult to have a smoother API (maybe use a trait)
   - [ ] `deser`: do not store type names as string, rather just the TypeId. And
         get back the string when building the final `ConvResults`
 - [ ] ?? Things to consider but might not be implemented.
-  - [ ] ?? Recursive `template-kdl` by removing `binding_index` field from `Binding` struct
+  - [X] ?? Recursive `template-kdl` by removing `binding_index` field from `Binding` struct
   - [ ] ?? type-directed field assignment (arbitrary ordering of fields in kdl file
         as long as it is possible to guess to which field a node element belongs based
         on either field name or type)
