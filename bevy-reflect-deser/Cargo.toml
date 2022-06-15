@@ -7,7 +7,7 @@ readme = "README.md"
 keywords = ["bevy", "markup"]
 categories = ["game-development"]
 repository = "https://github.com/nicopap/bevy-kdl-ui"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 
 [features]
@@ -16,9 +16,9 @@ default = ["fancy-errors"]
 
 [dependencies]
 strsim = { version = "0.10.0", optional = true }
-multierr-span = { version = "0.3.0", path = "../multierr-span"}
+multierr-span = { version = "0.4.0", path = "../multierr-span"}
 thiserror = "1.0"
-template-kdl = { version = "0.3.0", path = "../template-kdl"}
+template-kdl = { version = "0.4.0", path = "../template-kdl"}
 bevy_reflect = "0.8.0-dev"
 kdl = "4.2"
 nonmax = "0.5"

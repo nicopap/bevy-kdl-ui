@@ -6,11 +6,11 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["markup"]
 repository = "https://github.com/nicopap/bevy-kdl-ui"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 
 [dependencies]
-multierr-span = { version = "0.3.0", features = ["kdl-impls", "mappable-rc-impls"], path = "../multierr-span"}
+multierr-span = { version = "0.4.0", features = ["kdl-impls", "mappable-rc-impls"], path = "../multierr-span"}
 thiserror = "1.0"
 kdl = "4.2"
 mappable-rc = "0.1.0"

@@ -8,7 +8,7 @@ proper position in the source reader.
 
 Add this to your `Cargo.toml`:
 ```toml
-template-kdl = "0.3.0"
+template-kdl = "0.4.0"
 ```
 
 ## Usage
