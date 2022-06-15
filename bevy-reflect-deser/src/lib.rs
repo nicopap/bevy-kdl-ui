@@ -9,7 +9,7 @@ mod err;
 mod newtype;
 mod visit;
 
-pub use err::{ConvertError, ConvertErrors, ConvertResult};
+pub use err::{ConvertErrors, ConvertResult, Error};
 pub use visit::{convert_doc, from_doc};
 
 pub type DynRefl = Box<dyn Reflect>;
@@ -21,6 +21,7 @@ mod test {
     use bevy_reflect::{FromReflect, Reflect, TypeRegistration, TypeRegistry};
     use bevy_utils::HashMap;
     use kdl::KdlDocument;
+    use miette::Result;
 
     macro_rules! map {
         ($($key:expr => $value:expr),*$(,)?) => ({
@@ -88,7 +89,7 @@ mod test {
     #[derive(Clone, PartialEq, Reflect, Default, Debug, FromReflect)]
     #[reflect(PartialEq)]
     struct Bar(f64);
-    fn parse_kdl<T: FromReflect>(text: &str) -> ConvertResult<T> {
+    fn parse_kdl<T: FromReflect>(text: &str) -> Result<T, ConvertErrors> {
         let mut registry = TypeRegistry::default();
         macro_rules! register_all {
             ($($ty_name:ty ),* $(,)? ) => ({$(
@@ -106,7 +107,11 @@ mod test {
         );
         register_more!((i128, f32, String, f32, u32), Option<u8>, Vec<String>, HashMap<String, f32>);
         let mut document: KdlDocument = text.parse().unwrap();
-        convert_doc(document, &registry).map(|val| T::from_reflect(val.as_ref()).unwrap())
+        match convert_doc(document, &registry) {
+            ConvertResult::Deserialized(val) => Ok(T::from_reflect(val.as_ref()).unwrap()),
+            ConvertResult::Errors(errs) => Err(errs),
+            ConvertResult::Exports(_) => panic!("Never call parse_kdl with an export node"),
+        }
     }
     #[test]
     fn test_component() {
@@ -122,36 +127,36 @@ mod test {
     }
     #[rustfmt::skip]
     #[test]
-    fn more_test() {
+    fn more_test() -> Result<()> {
         // TODO: Enum variants n' stuff
         // assert_eq!(parse_kdl::<E>("E \"Y\""), Ok(E::Y));
 
-        assert_eq!(parse_kdl::<D>("D x=10;"), Ok(D { x: 10 }));
-        assert_eq!(parse_kdl::<D>("D 10;"), Ok(D { x: 10 }));
+        assert_eq!(parse_kdl::<D>("D x=10;")?, D { x: 10 });
+        assert_eq!(parse_kdl::<D>("D 10;")?, D { x: 10 });
 
-        assert_eq!(parse_kdl::<C>("C 22.0;"), Ok(C(22.0)));
+        assert_eq!(parse_kdl::<C>("C 22.0;")?, C(22.0));
 
-        assert_eq!(parse_kdl::<B>("B"), Ok(B));
+        assert_eq!(parse_kdl::<B>("B")?, B);
 
         assert_eq!(
             // explicit declaration
-            parse_kdl::<A>("A x=3030 { d x=140; c 444.0;}"),
-            Ok(A { x: 3030, d: D { x: 140 }, c: C(444.0) })
+            parse_kdl::<A>("A x=3030 { d x=140; c 444.0;}")?,
+            A { x: 3030, d: D { x: 140 }, c: C(444.0) }
         );
         assert_eq!(
             // Arbitrary order
-            parse_kdl::<A>("A x=5151 { c 515.0; d 155; }"),
-            Ok(A { x: 5151, d: D { x: 155 }, c: C(515.0) })
+            parse_kdl::<A>("A x=5151 { c 515.0; d 155; }")?,
+            A { x: 5151, d: D { x: 155 }, c: C(515.0) }
         );
         assert_eq!(
             // Anonymous declaration
-            parse_kdl::<A>("A 4144 { D x=441; C 414.0;}"),
-            Ok(A { x: 4144, d: D { x: 441 }, c: C(414.0) })
+            parse_kdl::<A>("A 4144 { D x=441; C 414.0;}")?,
+            A { x: 4144, d: D { x: 441 }, c: C(414.0) }
         );
         assert_eq!(
             // value type casting
-            parse_kdl::<A>("A x=6161 c=616.0 d=16;"),
-            Ok(A { x: 6161, d: D { x: 16 }, c: C(616.0) })
+            parse_kdl::<A>("A x=6161 c=616.0 d=16;")?,
+            A { x: 6161, d: D { x: 16 }, c: C(616.0) }
         );
         let f = r#"
         F {
@@ -162,7 +167,7 @@ mod test {
             d: (-34234552, 3943.13456, "I am a foo".to_owned(), 65431.25543243, 0b101010101010101010101010),
             b: Some(255),
         };
-        assert_eq!(parse_kdl::<F>(f), Ok(f_v));
+        assert_eq!(parse_kdl::<F>(f)?, f_v);
         let g = r#"
         G {
             y "hello" "this" "is" "a" "series" "of" "worlds";
@@ -173,6 +178,7 @@ mod test {
             y: string_vec!["hello", "this", "is", "a", "series", "of", "worlds"],
             z: map!{"pi" => 3.14, "e" => 2.7182818, "tau" => 6.28, "ln2" => 0.69314},
         };
-        assert_eq!(parse_kdl::<G>(g), Ok(g_v));
+        assert_eq!(parse_kdl::<G>(g)?, g_v);
+        Ok(())
     }
 }

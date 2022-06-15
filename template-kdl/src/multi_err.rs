@@ -244,12 +244,12 @@ impl<T, E> From<Result<T, E>> for MultiResult<T, E> {
 macro_rules! multi_try {
     ($acc:expr, $body:expr) => {
         match $body.into() {
-            MultiResult::Ok(t) => t,
-            MultiResult::OkErr(t, errs) => {
+            $crate::multi_err::MultiResult::Ok(t) => t,
+            $crate::multi_err::MultiResult::OkErr(t, errs) => {
                 $acc.extend_errors(errs);
                 t
             }
-            MultiResult::Err(errs) => return $acc.into_many_errors(errs),
+            $crate::multi_err::MultiResult::Err(errs) => return $acc.into_many_errors(errs),
         }
     };
 }

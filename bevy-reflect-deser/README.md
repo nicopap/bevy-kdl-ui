@@ -5,8 +5,9 @@ get a `Box<dyn bevy_reflect::Reflect>` out of any deserializable struct.
 Optionally provides great error reporting based on the [miette] library.
 with the `fancy-errors` feature. It is enabled by default.
 
-**Only works with [template-kdl] crate**. It is likely to not change
-because KDL doesn't translate well to the serde data format.
+**Only works with [template-kdl] crate**. Currently, work is being done
+to make the input type parametrized, so that it's possible to use this crate
+with arbitrary serialization format.
 
 Features:
 * Parses `Box<dyn Reflect>`.
@@ -210,13 +211,10 @@ In short, all the following declarations are equivalent:
 ```kdl, 27
 NamedNestedNewtype inner=9999
 NamedNestedNewtype 9999
-(NamedNestedNewtype)Newtype 9999
-(NamedNestedNewtype)Newtype inner=9999
 (NamedNestedNewtype)- 9999
 NamedNestedNewtype inner=(Newtype)9999
 - 9999
-Newtype 9999
-Newtype inner=9999
+- inner=9999
 ```
 
 
@@ -265,7 +263,9 @@ SimpleFields "Hello World" 34
 
 **Warning**: you cannot use the "field name for type name" feature with the
 unnamed declaration for structs, since the presence of a name implies a
-name-based declaration scheme.
+name-based declaration scheme. **TODO**: This is actually not true, we only
+check for the first field. There is even a test case that fails of we fail
+on declaration-style mixup.
 
 It is also possible to represent the fields as *children nodes*. The *child
 node* *name* will be the field name, while its first argument will be the 

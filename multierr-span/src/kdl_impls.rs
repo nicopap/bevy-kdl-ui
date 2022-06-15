@@ -92,20 +92,22 @@ impl<'a> Sref<'a, KdlIdentifier> {
 }
 macro_rules! offset {
     // Compute lengths for offset
-    (@length $sel:ident optional($before:expr, $after:expr, $_:ty) $method:ident) => (
+    (@length $sel:ident optional ($before:expr, $after:expr) $method:ident) => (
         $sel.inner.$method().map_or(0, |t| t.length() + $before + $after)
     );
-    (@length $sel:ident fallback($alt:ident, $_:ty) $method:ident) => (
+    (@length $sel:ident fallback($alt:ident) $method:ident) => (
         $sel.inner
             .$alt()
             .map_or_else(|| $sel.inner.$method().length(), |t| t.length())
     );
-    (@length $sel:ident $_m:ident $_a:tt $method:ident) => ($sel.inner.$method().length());
+    (@length $sel:ident hidden $method:ident) => ($sel.inner.$method().length());
+    (@length $sel:ident proxy $method:ident) => ($sel.inner.$method().length());
+    (@length $sel:ident array $method:ident) => ($sel.inner.$method().length());
     // Compute offsets based on previously encoutered fields
     // We call this branch from inside the method definitions because you need access
     // to `self`.
     ($sel:ident [$(, $modif:ident ($($mod_args:tt)?) $method:ident )*]) => (
-        $sel.offset $(+ offset!(@length $sel $modif ($($mod_args)?) $method))*
+        $sel.offset $(+ offset!(@length $sel $modif $($mod_args)? $method))*
     );
 }
 macro_rules! method {

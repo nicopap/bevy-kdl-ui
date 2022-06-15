@@ -3,7 +3,7 @@ use std::fmt::Write;
 #[cfg(feature = "fancy-errors")]
 use miette::Diagnostic;
 
-use template_kdl::span::Spanned;
+use multierr_span::Spanned;
 
 mod miette_compat {
     #[cfg(feature = "fancy-errors")]
@@ -29,16 +29,57 @@ mod miette_compat {
     }
 }
 use miette_compat::*;
+use template_kdl::{multi_err::MultiResult, Bindings};
+
+use crate::DynRefl;
 
 // TODO: consider using TypeId instead of &'static str and String, and convert
 // into "proper" error message at one point with the help of the registry
 /// Ways for the conversion from KDL to Reflect to fail
+#[cfg_attr(feature = "fancy-errors", derive(Diagnostic), diagnostic())]
 #[derive(Debug, Clone, thiserror::Error, PartialEq)]
-pub enum ConvertError {
+#[error("{source}")]
+pub struct Error {
+    pub source: ErrorType,
+    #[cfg_attr(feature = "fancy-errors", label)]
+    pub span: SourceSpan,
+
+    #[cfg(feature = "fancy-errors")]
+    #[help]
+    help: Option<String>,
+}
+impl From<template_kdl::err::Error> for Error {
+    fn from(terr: template_kdl::err::Error) -> Self {
+        let span = terr.span();
+        Self::new(&span, terr.source.into())
+    }
+}
+impl Error {
+    pub(super) fn new(span: &impl Spanned, error: ErrorType) -> Self {
+        Self {
+            span: span.span().pair().into(),
+            #[cfg(feature = "fancy-errors")]
+            help: error.help(),
+            source: error,
+        }
+    }
+    #[cfg(test)]
+    pub(super) fn offset(&self) -> usize {
+        self.span.offset()
+    }
+    #[cfg(test)]
+    pub(super) fn range(&self) -> std::ops::Range<usize> {
+        let start = self.span.offset();
+        let end = start + self.span.len();
+        start..end
+    }
+}
+#[derive(Debug, Clone, thiserror::Error, PartialEq)]
+pub enum ErrorType {
     #[error("This operation is unsupported: {0}")]
     GenericUnsupported(String),
     #[error("Templating error: {0}")]
-    Template(#[from] template_kdl::err::Error),
+    Template(#[from] template_kdl::err::ErrorType),
     #[error("Kdl declaration has type `{actual}` but rust type `{expected}` was expected")]
     TypeMismatch {
         expected: &'static str,
@@ -60,14 +101,14 @@ pub enum ConvertError {
         name: &'static str,
         available: Vec<(String, &'static str)>,
     },
+    #[error("Maps declared with pair style should only have two fields, this one has {0} fields")]
+    PairMapNotPair(u8),
     #[error("{name} has {actual} fields, but the declaration contains at least {requested}")]
-    TooManyTupleStructFields {
+    TooManyFields {
         name: &'static str,
         actual: u8,
         requested: u8,
     },
-    #[error("Declared {requested} fields for tuple of size {actual}")]
-    TooManyTupleFields { actual: u8, requested: u8 },
     #[error("Not all fields in {name} are declared.")]
     NotEnoughStructFields {
         missing: Vec<u8>,
@@ -85,11 +126,14 @@ pub enum ConvertError {
     #[error("Field at component declaration site.")]
     BadComponentTypeName,
 }
-impl ConvertError {
+impl ErrorType {
+    pub(crate) fn spanned(self, span: &impl Spanned) -> Error {
+        Error::new(span, self)
+    }
     #[cfg(feature = "fancy-errors")]
     fn help(&self) -> Option<String> {
         use strsim::levenshtein;
-        use ConvertError::*;
+        use ErrorType::*;
         let max_of = |ty: &str| -> i64 {
             match ty {
                 "i8" => i8::MAX as i64,
@@ -117,11 +161,11 @@ impl ConvertError {
             UnnamedMapField { .. } => Some("Add a key to the values.".to_owned()),
             BadComponentTypeName => Some("You are declaring a field type, but only components are expected here.".to_owned()),
 
+            PairMapNotPair(_) => None,
             UntypedTupleField => None,
             TupleMapDeclarationMixup => None,
             MultipleSameField { .. } => Some("Remove one of the fields".to_owned()),
-            TooManyTupleFields { .. } => Some("Remove the extraneous one".to_owned()),
-            TooManyTupleStructFields { .. } => Some("Remove the extraneous one".to_owned()),
+            TooManyFields { .. } => Some("Remove the extraneous one".to_owned()),
             NotEnoughTupleFields {..} =>  Some("Add the missing ones".to_owned()) ,
             NotEnoughStructFields { name, expected, missing } => {
                 let mut missing_fields = String::with_capacity(missing.len() * 12);
@@ -161,16 +205,15 @@ pub struct ConvertErrors {
     pub(super) source_code: String,
 
     #[cfg_attr(feature = "fancy-errors", related)]
-    pub(super) errors: Vec<SpannedError>,
+    pub(super) errors: Vec<Error>,
 }
 impl ConvertErrors {
-    pub(super) fn new(source_code: String, errors: Vec<Spanned<ConvertError>>) -> Self {
-        let errors = errors.into_iter().map(SpannedError::new).collect();
+    pub(super) fn new(source_code: String, errors: Vec<Error>) -> Self {
         Self { source_code, errors }
     }
     pub fn show_for(&self) -> String {
         let mut ret = String::with_capacity(self.errors.len() * 160);
-        for SpannedError { span, error, .. } in &self.errors {
+        for Error { span, source, .. } in &self.errors {
             ret.push('\n');
             ret.push_str(&self.source_code);
             writeln!(
@@ -181,50 +224,25 @@ impl ConvertErrors {
                 x = ""
             )
             .unwrap();
-            write!(&mut ret, "\nat {}: {error}", span.offset()).unwrap();
+            write!(&mut ret, "\nat {}: {source}", span.offset()).unwrap();
         }
         ret
     }
     #[cfg(test)]
-    pub(super) fn errors(&self) -> impl Iterator<Item = &SpannedError> {
+    pub(super) fn errors(&self) -> impl Iterator<Item = &Error> {
         self.errors.iter()
     }
 }
 
-#[cfg_attr(feature = "fancy-errors", derive(Diagnostic), diagnostic())]
-#[derive(Debug, PartialEq, thiserror::Error)]
-#[error("{error}")]
-#[non_exhaustive]
-pub(super) struct SpannedError {
-    #[cfg_attr(feature = "fancy-errors", label)]
-    span: SourceSpan,
-
-    pub(super) error: ConvertError,
-
-    #[cfg(feature = "fancy-errors")]
-    #[help]
-    help: Option<String>,
+pub enum ConvertResult {
+    Deserialized(DynRefl),
+    Exports(Bindings),
+    Errors(ConvertErrors),
 }
-impl SpannedError {
-    pub(super) fn new(error: Spanned<ConvertError>) -> Self {
-        let Spanned(span, error) = error;
-        Self {
-            span: span.pair().into(),
-            #[cfg(feature = "fancy-errors")]
-            help: error.help(),
-            error,
-        }
-    }
-    #[cfg(test)]
-    pub(super) fn offset(&self) -> usize {
-        self.span.offset()
-    }
-    #[cfg(test)]
-    pub(super) fn range(&self) -> std::ops::Range<usize> {
-        let start = self.span.offset();
-        let end = start + self.span.len();
-        start..end
+impl ConvertResult {
+    pub(crate) fn errors(repr: impl Into<String>, errors: Vec<Error>) -> Self {
+        Self::Errors(ConvertErrors::new(repr.into(), errors))
     }
 }
-pub type ConvertResult<T> = Result<T, ConvertErrors>;
-pub(super) type ConvResult<T> = Result<T, ConvertError>;
+pub(super) type ConvResult<T> = Result<T, Error>;
+pub type MResult<T> = MultiResult<T, Error>;

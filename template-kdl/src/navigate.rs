@@ -43,39 +43,80 @@ impl PartialEq for Sstring {
     }
 }
 
+#[derive(Debug)]
 pub struct ThunkField(pub(crate) ThunkField_);
 impl ThunkField {
-    fn node(inner: NodeThunk) -> Self {
+    pub fn node(inner: NodeThunk) -> Self {
         Self(ThunkField_::Node(inner))
     }
     fn entry(inner: Smarc<KdlEntry>, ctx: Context) -> Self {
         Self(ThunkField_::Entry(inner, ctx))
     }
 }
+impl Spanned for ThunkField {
+    fn span(&self) -> Span {
+        match &self.0 {
+            ThunkField_::Entry(e, _) => e.span(),
+            ThunkField_::Node(n) => n.span(),
+        }
+    }
+}
+#[derive(Debug)]
 pub(crate) enum ThunkField_ {
     Node(NodeThunk),
     Entry(Smarc<KdlEntry>, Context),
 }
+// TODO: consider this API
+// pub enum IsNamed { Yes, No }
+// pub enum ValueKind {
+//     Bare,
+//     EmptyList,
+//     MixedList { first: IsNamed },
+//     List(IsNamed),
+//     SingleElemList(IsNamed),
+// }
 pub enum Value<Lst, Br> {
     List(Lst),
     Bare(Br),
 }
+impl<Lst, Br> Value<Lst, Br> {
+    pub fn unwrap_list(self) -> Lst {
+        match self {
+            Value::Bare(_) => panic!("Expected a list, got a bare value"),
+            Value::List(lst) => lst,
+        }
+    }
+}
+pub type NavValue<T> = Value<<T as Navigable>::Fields, <T as Navigable>::Val>;
 /// A data structure that can be navigated to build a data structure out of it
-pub trait Navigable<V, N> {
-    type Field: Navigable<V, N> + ?Sized;
+pub trait Navigable {
+    type Val;
+    type Name;
+    type Field: Navigable<Val = Self::Val, Name = Self::Name>;
     type Fields: Iterator<Item = Self::Field>;
 
-    fn value(&self) -> Value<Self::Fields, V>;
-    fn name(&self) -> Option<N>;
-    fn ty(&self) -> Option<N>;
+    fn value(&self) -> Value<Self::Fields, Self::Val>;
+    fn name(&self) -> Option<Self::Name>;
+    fn ty(&self) -> Option<Self::Name>;
     fn value_count(&self) -> Value<u32, ()> {
         match self.value() {
             Value::Bare(_) => Value::Bare(()),
             Value::List(lst) => Value::List(lst.count() as u32),
         }
     }
+    fn is_first_named(&self) -> bool {
+        match self.value() {
+            Value::Bare(_) => false,
+            Value::List(lst) => lst.take(1).any(|e| e.name().is_some()),
+        }
+    }
+    // TODO: for making templating generic over Navigable, use `value_count`
+    // fn value_ext(&self) -> ValueExt<Self::Field, Self::Val>;
+    // enum ValueExt<F, V> { Empty, Single(F), Many(Box<dyn Iterator<Item=F>>), Bare(V) }
 }
-impl Navigable<Smarc<KdlValue>, Sstring> for ThunkField {
+impl Navigable for ThunkField {
+    type Val = Smarc<KdlValue>;
+    type Name = Sstring;
     type Field = ThunkField;
     type Fields = Box<dyn Iterator<Item = Self::Field>>;
 
@@ -108,7 +149,9 @@ impl Navigable<Smarc<KdlValue>, Sstring> for ThunkField {
         }
     }
 }
-impl Navigable<Smarc<KdlValue>, Sstring> for NodeThunk {
+impl Navigable for NodeThunk {
+    type Val = Smarc<KdlValue>;
+    type Name = Sstring;
     type Field = ThunkField;
     type Fields = Box<dyn Iterator<Item = Self::Field>>;
 
@@ -143,6 +186,7 @@ impl Navigable<Smarc<KdlValue>, Sstring> for NodeThunk {
         if self.is_value() {
             Value::Bare(())
         } else {
+            // TODO: this is wrong
             let entries = self.body.inner.entries().len() as u32;
             let children = self.body.inner.children().map_or(0, |c| c.nodes().len()) as u32;
             Value::List(entries + children)
@@ -161,9 +205,7 @@ impl Navigable<Smarc<KdlValue>, Sstring> for NodeThunk {
             let entry = self.body.entries().next().unwrap();
             entry.ty().map(into)
         } else {
-            let name = || Navigable::name(self);
-            let ty = self.body.ty();
-            ty.map(into).or_else(name)
+            self.body.ty().map(into)
         }
     }
 }
@@ -171,7 +213,9 @@ pub enum SpannedField {
     Node(SpannedNode),
     Entry(Smarc<KdlEntry>),
 }
-impl Navigable<Smarc<KdlValue>, Sstring> for SpannedField {
+impl Navigable for SpannedField {
+    type Val = Smarc<KdlValue>;
+    type Name = Sstring;
     type Field = SpannedField;
     type Fields = Box<dyn Iterator<Item = Self::Field>>;
 
@@ -200,7 +244,9 @@ impl Navigable<Smarc<KdlValue>, Sstring> for SpannedField {
         }
     }
 }
-impl Navigable<Smarc<KdlValue>, Sstring> for SpannedNode {
+impl Navigable for SpannedNode {
+    type Val = Smarc<KdlValue>;
+    type Name = Sstring;
     type Field = SpannedField;
     type Fields = Box<dyn Iterator<Item = Self::Field>>;
 
