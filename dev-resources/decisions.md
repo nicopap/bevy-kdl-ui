@@ -126,6 +126,38 @@ string interner instead of a bunch of `Marc<str>`, and for two using a context
 where bindings are not strings but rather indices into the context, which would
 supposedly store the bindings in contiguous memory.
 
+### Make a Deserializer Wrapper
+
+Idea: Do not depend at all on kdl for `template-kdl`, but only depend on serde.
+This way it works with any sort of serialization format.
+
+This needs thinking more thouroufully of the API for templating. The current
+idea is:
+* Provide an API to build `Bindings`. It should be able to own `Deserializer`
+  for substitution.
+* Completely decouple declaration from substitution. Ability to construct a
+  wrapping `Deserializer` from an initial deserializer and bindings.
+* Rethink API so that it makes more sense to use it in a generic way.
+
+#### Rethinking the template call
+
+**Problem**: current template call is highly dependent on KDL, we want
+something that makes sense in serde data repr.
+
+Currently: We have a mix of by-name and by-index arguments. **we
+automatically use by-index for children nodes**, while for entries, we
+only do it if the name is omitted. This is very convinient, because it
+let me declare node arguments as direct child of the template call node.
+This avoids having to wrap every node arguments into another node.
+
+Ideally, we could extend the `Deserializer` API to have a "is this value
+replaceable?" method, but I don't think it's possible, since it doesn't
+have at any point access to the value. It also precludes re-using already
+existing deserializers.
+
+It would be fine to ignore the issue with KDL, since it's pretty exceptional,
+and write my own Deserializer for it.
+
 ## bevy-reflect-deser
 
 ### Complex keys in maps

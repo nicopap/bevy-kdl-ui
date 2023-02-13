@@ -15,16 +15,16 @@ fancy-errors = ["miette/fancy"]
 default = []
 
 [dependencies]
-thiserror = "1.0"
-serde = "1.0"
-anyhow = "1.0"
-bevy_reflect = "0.8.0-dev"
-kdl = "4.1"
-nonmax = "0.5"
-miette = "4.6"
+thiserror = { workspace = true }
+serde = { workspace = true }
+anyhow = { workspace = true }
+bevy_reflect = { workspace = true }
+kdl = { workspace = true }
+nonmax = { workspace = true }
+miette = { workspace = true }
 
 [dev-dependencies]
 # For testing the hashmap reflection
-bevy_reflect = "0.8.0-dev"
-bevy_utils = "0.8.0-dev"
-miette = {version ="4.6", features=["fancy"]}
+bevy_reflect = { workspace = true }
+bevy_utils = { workspace = true }
+miette = { workspace = true , features=["fancy"]}

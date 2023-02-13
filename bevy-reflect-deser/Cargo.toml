@@ -15,17 +15,16 @@ fancy-errors = ["miette/fancy", "strsim"]
 default = ["fancy-errors"]
 
 [dependencies]
-strsim = { version = "0.10.0", optional = true }
+strsim = { workspace = true, optional = true }
 multierr-span = { version = "0.4.0", path = "../multierr-span"}
-thiserror = "1.0"
+thiserror = { workspace = true }
 template-kdl = { version = "0.4.0", path = "../template-kdl"}
-bevy_reflect = "0.8.0-dev"
-kdl = "4.2"
-nonmax = "0.5"
-miette = "4.6"
+bevy_reflect = { workspace = true }
+kdl = { workspace = true }
+nonmax = { workspace = true }
+miette = { workspace = true }
 
 [dev-dependencies]
 # For testing the hashmap reflection
-bevy_reflect = "0.8.0-dev"
-bevy_utils = "0.8.0-dev"
-miette = {version ="4.6", features=["fancy"]}
+bevy_utils = { workspace = true }
+miette = { workspace = true, features=["fancy"]}

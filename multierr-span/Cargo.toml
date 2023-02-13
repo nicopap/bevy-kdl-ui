@@ -14,6 +14,6 @@ kdl-impls = ["kdl"]
 mappable-rc-impls = ["mappable-rc"]
 
 [dependencies]
-kdl = {version = "4.2", optional = true}
-mappable-rc = {version = "0.1", optional = true}
+kdl = { workspace = true , optional = true}
+mappable-rc = { workspace = true, optional = true}
 

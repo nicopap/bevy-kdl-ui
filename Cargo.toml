@@ -2,7 +2,15 @@
 members = ["bevy-reflect-deser", "template-kdl", "multierr-span"]
 resolver = "2"
 
-
-[patch.crates-io]
-bevy_reflect = { git = "https://github.com/bevyengine/bevy.git", branch="main"}
-bevy_utils = { git = "https://github.com/bevyengine/bevy.git", branch="main"}
+[workspace.dependencies]
+anyhow = "1.0"
+bevy_reflect = "0.8.0-dev"
+bevy_utils = "0.8.0-dev"
+kdl = "4.1"
+mappable-rc = "0.1"
+miette = "4.6"
+nonmax = "0.5"
+serde = "1.0"
+strsim = "0.10.0"
+thiserror = "1.0"
+pretty_assertions = "1.2"

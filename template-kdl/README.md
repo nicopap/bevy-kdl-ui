@@ -143,8 +143,8 @@ kdl nodes.
 It is an error to call a template without the proper `targuments`, or with too
 many `targuments`, or referencing `tparameter` names that do not exist.
 
-You can also pass nodes as `targument`. To do so, simply use a node with the
-the template name and the `targument` nodes as children:
+You can also pass nodes as `targument`. To do so, use a node with the
+template name and the `targument` nodes as children:
 ```kdl, initial, 4-node-arg
 my-favorite-washing-machine "manifacturer" {
   WashingMachine noise_db=4.0 loading="Front" {
@@ -197,7 +197,9 @@ my-favorite-washing-machine noise=4.0 loading-type="Top" country="China" {
   }
 }
 LastNodeInFile {
-  my-favorite-washing-machine 5.0
+  // TODO: single non-named argument do not count, because it is interpreted
+  // as a value
+  my-favorite-washing-machine noise=5.0
   my-favorite-washing-machine country="Laos"
 }
 ```

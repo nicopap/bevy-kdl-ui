@@ -15,9 +15,9 @@ fancy-errors = ["miette/fancy"]
 default = []
 
 [dependencies]
-thiserror = "1.0"
-bevy_reflect = "0.8.0-dev"
-kdl = "4.1"
-miette = "4.6"
+thiserror = { workspace = true }
+bevy_reflect = { workspace = true }
+kdl = { workspace = true }
+miette = { workspace = true }
 bevy-reflect-deser = { version = "0.4.0", path = "../bevy-reflect-deser" }
 template-kdl = { version = "0.4.0", path = "../template-kdl"}

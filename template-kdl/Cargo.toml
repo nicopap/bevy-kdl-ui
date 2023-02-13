@@ -11,10 +11,11 @@ edition = "2021"
 
 [dependencies]
 multierr-span = { version = "0.4.0", features = ["kdl-impls", "mappable-rc-impls"], path = "../multierr-span"}
-thiserror = "1.0"
-kdl = "4.2"
-mappable-rc = "0.1.0"
+serde = { workspace = true }
+thiserror = { workspace = true }
+kdl = { workspace = true }
+mappable-rc = { workspace = true }
 
 [dev-dependencies]
-miette = {version ="4.6", features=["fancy"]}
-pretty_assertions = "1.2"
+miette = { workspace = true , features=["fancy"]}
+pretty_assertions = { workspace = true }
