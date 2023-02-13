@@ -4,8 +4,8 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = "1.0"
-bevy_reflect = "0.8.0-dev"
-bevy_utils = "0.8.0-dev"
+bevy_reflect = "0.9"
+bevy_utils = "0.9"
 kdl = "4.1"
 mappable-rc = "0.1"
 miette = "4.6"

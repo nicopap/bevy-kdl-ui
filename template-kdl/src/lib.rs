@@ -18,8 +18,11 @@ use navigate::{Navigable, Value};
 use span::{SpannedDocument, SpannedNode};
 use template::NodeThunk;
 
+/// A parsed template KDL file.
 pub enum Document {
+    /// The file represents a node.
     Node(NodeThunk),
+    /// The file exports bindings.
     Exports(Bindings),
 }
 #[derive(Debug, Default, Clone)]

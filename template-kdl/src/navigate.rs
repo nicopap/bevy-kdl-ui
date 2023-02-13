@@ -21,7 +21,7 @@ pub struct Sstring {
 impl Deref for Sstring {
     type Target = str;
     fn deref(&self) -> &str {
-        &*self.inner
+        &self.inner
     }
 }
 impl From<SpannedIdent> for Sstring {
@@ -125,7 +125,7 @@ impl Navigable for ThunkField {
             ThunkField_::Node(n) => n.value(),
             ThunkField_::Entry(entry, ctx) => {
                 let value = entry.value();
-                let expanded = ctx.arguments.value(&*value).cloned();
+                let expanded = ctx.arguments.value(&value).cloned();
                 Value::Bare(expanded.unwrap_or(value))
             }
         }

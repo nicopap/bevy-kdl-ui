@@ -33,7 +33,7 @@ impl Bindings {
         let expose_name = |binding_name: &str| {
             exposed
                 .iter()
-                .find_map(|(from, to)| (binding_name == &**from).then(|| &*to))
+                .find_map(|(from, to)| (binding_name == &**from).then_some(to))
         };
         let exposed = self.visit().filter_map(|binding| {
             expose_name(binding.name.as_ref()).map(|new_name| Binding {

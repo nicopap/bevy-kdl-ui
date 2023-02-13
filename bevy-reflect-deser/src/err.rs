@@ -40,7 +40,7 @@ use crate::DynRefl;
 #[derive(Debug, Clone, thiserror::Error, PartialEq)]
 #[error("{source}")]
 pub struct Error {
-    pub source: ErrorType,
+    pub source: Box<ErrorType>,
     #[cfg_attr(feature = "fancy-errors", label)]
     pub span: SourceSpan,
 
@@ -60,7 +60,7 @@ impl Error {
             span: span.span().pair().into(),
             #[cfg(feature = "fancy-errors")]
             help: error.help(),
-            source: error,
+            source: Box::new(error),
         }
     }
     #[cfg(test)]
@@ -150,7 +150,7 @@ impl ErrorType {
             Template(template) => template.help(),
             GenericUnsupported(_) =>Some("This error is on the TODO list!".to_owned()),
             TypeMismatch { expected, .. } => Some(format!("You probably meant to declare a {expected}.")),
-            IntDomain(i, ty) if representable.contains(ty) && *i > max_of(*ty) =>
+            IntDomain(i, ty) if representable.contains(ty) && *i > max_of(ty) =>
                 Some(format!("{i} is larger than {}, the largest possible {ty}, try using a larger integer type.", max_of(ty))),
             IntDomain(i, u_ty) if u_ty.starts_with('u') && i.is_negative() =>
                 Some(format!("Try replacing {u_ty} by i{}, or using a positive value.", u_ty.strip_prefix('u').unwrap())),

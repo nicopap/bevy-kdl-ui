@@ -114,7 +114,7 @@ impl TryFrom<SpannedNode> for Tparameter {
         }
     }
 }
-impl<'a> TryFrom<Smarc<KdlEntry>> for Tparameter {
+impl TryFrom<Smarc<KdlEntry>> for Tparameter {
     type Error = Error;
     fn try_from(entry: Smarc<KdlEntry>) -> Result<Self, Self::Error> {
         match (entry.name(), entry.value()) {
@@ -209,12 +209,12 @@ impl Declaration {
             for (i, field) in fields.enumerate() {
                 let param = field
                     .name()
-                    .and_then(|n| self.param_named(&*n))
+                    .and_then(|n| self.param_named(&n))
                     .or_else(|| self.param_at(i));
                 match (field.0, param) {
                     (ThunkField_::Entry(entry, ctx), Some(param)) => {
                         let value = entry.value();
-                        let expanded = ctx.arguments.value(&*value).cloned();
+                        let expanded = ctx.arguments.value(&value).cloned();
                         let value = expanded.unwrap_or(value);
                         values.insert(param.name.clone(), value);
                     }
@@ -333,7 +333,7 @@ impl NodeThunk {
             .entries()
             .map(|e| {
                 let value = e.value();
-                let expanded = self.context.arguments.value(&*value).cloned();
+                let expanded = self.context.arguments.value(&value).cloned();
                 let value = KdlValue::clone(&expanded.unwrap_or(value));
                 if let Some(name) = e.name() {
                     KdlEntry::new_prop(KdlIdentifier::clone(&name), value)

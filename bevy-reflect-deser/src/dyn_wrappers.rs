@@ -176,7 +176,7 @@ impl Primitive for DynamicStruct {
         Ok(())
     }
     fn expected(&self, field: &Sstring, info: &Self::Info) -> ConvResult<&'static str> {
-        let name_type = |field: &NamedField| (field.name().clone().into_owned(), field.type_name());
+        let name_type = |field: &NamedField| (field.name().to_owned(), field.type_name());
         let err = || {
             ErrTy::NoSuchStructField {
                 name: info.name(),
@@ -185,7 +185,7 @@ impl Primitive for DynamicStruct {
             }
             .spanned(field)
         };
-        info.field(&*field).ok_or_else(err).map(|f| f.type_name())
+        info.field(field).ok_or_else(err).map(|f| f.type_name())
     }
     fn set_name(&mut self, name: String) {
         self.set_name(name);
@@ -196,12 +196,12 @@ impl Primitive for DynamicStruct {
         if actual != expected {
             let name = info.name();
             // TODO(reporting): find name of missing fields and add them to error
-            let expected: Vec<_> = info.iter().map(|t| t.name().clone().into_owned()).collect();
+            let expected: Vec<_> = info.iter().map(|t| t.name().to_owned()).collect();
             let is_missing = |n| self.field(n).is_none();
             let missing = expected
                 .iter()
                 .enumerate()
-                .filter_map(|(i, n)| is_missing(n).then(|| i as u8))
+                .filter_map(|(i, n)| is_missing(n).then_some(i as u8))
                 .collect();
             Err(ErrTy::NotEnoughStructFields { name, missing, expected })
         } else {
