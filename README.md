@@ -1,6 +1,7 @@
 # Bevy KDL UI
 
 Crates to provide smooth declaration of bevy UI:
+
 * [template-kdl]: A serialization format piggy-backing on KDL, adding a
   powerful yet minimalist macro expension system. The API provides spans
   to attribute nodes to their proper position in the source reader.
@@ -80,12 +81,18 @@ See the relevant sections in the respective crate READMEs.
 - [X] ?? Enable usage of kdl type specifiers and checking against expected values
 - [X] ?? Non-String Map access.
 - [ ] Add a `if_equal foo bar` template built-in.
+- [ ] Add features to template-kdl & bevy-reflect-deser that makes bevy-kdl-scene possible:
+  - [ ] template-kdl: `import` node for binding discoverability.
+  - [ ] bevy-reflect-deser: `Entity` map for easier-to-edit templates, allows
+        refering to other entities by a handle (such as a string or number)
+  - [ ] bevy-reflect-deser: Accept a list of bindings
+  - [ ] bevy-reflect-deser: Pass forward the template-kdl import node
 - [ ] bevy-kdl-scene features:
-  - [X] in teplate-kdl: remove dependency on pointers, own shit so that it might be
-    possible to use templates in a concurrent context. (see [arc-decision])
+  - [X] in template-kdl: remove dependency on pointers, own shit so that it might be
+        possible to use templates in a concurrent context. (see [arc-decision])
     - [X] Requires migrating to `Arc` everything instead of storing references. 
   - [X] Update template-kdl to return an alternative between `Vec<Definition>` and
-    `NodeThunk` when parsing a file
+        `NodeThunk` when parsing a file
   - [X] Add name rebinding to `export`
   - [X] Update template-kdl to accept a list of template definitions to parse a file with.
   - [ ] add a `components` node so that it's possible to define multiple

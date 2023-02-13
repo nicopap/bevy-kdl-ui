@@ -158,6 +158,17 @@ existing deserializers.
 It would be fine to ignore the issue with KDL, since it's pretty exceptional,
 and write my own Deserializer for it.
 
+### Declaring the list of dependencies
+
+**Problem**: we want in `bevy-kdl-scene` to premeptively load template declaration
+files used in scenes. If we don't, the templates used inside the files won't
+be expanded.
+
+#### The `import` node
+
+I think it's necessary to explicitly declare the bindings required for import.
+
+
 ## bevy-reflect-deser
 
 ### Complex keys in maps
@@ -348,6 +359,10 @@ anything. And `dyn_wrapper::type_info` should be able to correctly the case wher
 we tell it to not expect anything: it's not an error to not expect anything if we
 could deduce the type from the `declared` argument.
 
+### ser/deser entities
+
+**Problem**: We want human-readable (and editable) entity names in the scene
+file. The default reflect serialization is wonk.
 
 [serde data model]: https://serde.rs/data-model.html
 [serde_kdl]: https://crates.io/crates/serde_kdl

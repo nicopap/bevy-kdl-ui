@@ -19,6 +19,7 @@ use span::{SpannedDocument, SpannedNode};
 use template::NodeThunk;
 
 /// A parsed template KDL file.
+#[derive(Clone, Debug)]
 pub enum Document {
     /// The file represents a node.
     Node(NodeThunk),

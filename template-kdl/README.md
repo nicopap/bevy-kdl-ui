@@ -19,6 +19,7 @@ the file with an `export` node. It is also possible to seed the templating
 engine with your own templates programmatically.
 
 Terms:
+
 * `declaration site`: Where the template is defined
 * `call site`: Where the template is used
 * `body`: The node into which the template expands at call site, defined at

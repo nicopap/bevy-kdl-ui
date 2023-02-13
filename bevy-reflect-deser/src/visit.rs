@@ -13,6 +13,8 @@ pub fn read_navigable(
 ) -> MultiResult<DynRefl, Error> {
     newtype::make_named_dyn(registry, expected, field)
 }
+// TODO: accept additional bindings
+// TODO: function to extract necessary bindings
 pub fn read_doc(
     doc: KdlDocument,
     doc_name: String,
@@ -33,7 +35,7 @@ pub fn read_doc(
         }
     }
 }
-pub fn convert_doc(doc: KdlDocument, registry: &TypeRegistry) -> ConvertResult {
+pub fn from_doc_untyped(doc: KdlDocument, registry: &TypeRegistry) -> ConvertResult {
     read_doc(doc, "".to_owned(), None, registry)
 }
 pub fn from_doc<T: Typed>(doc: KdlDocument, registry: &TypeRegistry) -> ConvertResult {

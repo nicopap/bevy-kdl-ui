@@ -36,13 +36,13 @@ impl Error {
 impl ErrorType {
     const NONSTR_PARAM: &'static str =
         "Template definition entries represent the tparameters of the template. \
-tparameters **must** have a name so that it's possible to refer to them in the \
-body of the template. See \
-https://github.com/nicopap/bevy-kdl-ui/tree/main/template-kdl#function-templates \
-for how to declare a template.";
+        tparameters **must** have a name so that it's possible to refer to them in the \
+        body of the template. See \
+        https://github.com/nicopap/bevy-kdl-ui/tree/main/template-kdl#function-templates \
+        for how to declare a template.";
     const NO_BODY: &'static str =
         "A template definition must have a body. See how to use templates at \
-https://github.com/nicopap/bevy-kdl-ui/tree/main/template-kdl#value-templates";
+        https://github.com/nicopap/bevy-kdl-ui/tree/main/template-kdl#value-templates";
     pub fn help(&self) -> Option<String> {
         match self {
             ErrorType::NonstringParam(_) => Some(Self::NONSTR_PARAM.to_owned()),

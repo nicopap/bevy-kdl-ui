@@ -2,7 +2,7 @@ use std::any::{type_name, Any};
 use std::fmt;
 
 use bevy_reflect::{FromReflect, Reflect, TypeRegistration, TypeRegistry, Typed};
-use bevy_reflect_deser::{convert_doc, from_doc, ConvertErrors, ConvertResult};
+use bevy_reflect_deser::{from_doc, from_doc_untyped, ConvertErrors, ConvertResult};
 use bevy_utils::HashMap;
 use miette::GraphicalReportHandler;
 
@@ -122,7 +122,7 @@ fn assert_eq_kdl<T: FromReflect + PartialEq + fmt::Debug>(
     reg: &TypeRegistry,
 ) -> Result<(), ConvertErrors> {
     println!("in section {section_no}");
-    let converted = match convert_doc(text.parse().unwrap(), &reg) {
+    let converted = match from_doc_untyped(text.parse().unwrap(), &reg) {
         ConvertResult::Errors(errs) => return Err(errs),
         ConvertResult::Deserialized(val) => T::from_reflect(val.as_ref()).unwrap(),
         ConvertResult::Exports(_) => panic!("Never call parse_kdl with an export node"),
@@ -136,7 +136,7 @@ fn assert_fails_kdl<T: FromReflect + fmt::Debug + Any>(
     reg: &TypeRegistry,
 ) -> Result<(), ConvertErrors> {
     println!("in section {section_no}");
-    let converted = match convert_doc(text.parse().unwrap(), &reg) {
+    let converted = match from_doc_untyped(text.parse().unwrap(), &reg) {
         ConvertResult::Errors(errs) => Err(errs),
         ConvertResult::Deserialized(val) => Ok(T::from_reflect(val.as_ref()).unwrap()),
         ConvertResult::Exports(_) => panic!("Never call parse_kdl with an export node"),

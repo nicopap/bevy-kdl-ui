@@ -1,16 +1,22 @@
 [workspace]
-members = ["bevy-reflect-deser", "template-kdl", "multierr-span"]
+members = ["bevy-reflect-deser", "template-kdl", "multierr-span", "bevy-kdl-scene"]
 resolver = "2"
 
 [workspace.dependencies]
 anyhow = "1.0"
+bevy_app = "0.9"
+bevy_asset = "0.9"
+bevy_ecs = "0.9"
 bevy_reflect = "0.9"
 bevy_utils = "0.9"
 kdl = "4.1"
 mappable-rc = "0.1"
 miette = "4.6"
 nonmax = "0.5"
+pretty_assertions = "1.2"
 serde = "1.0"
 strsim = "0.10.0"
 thiserror = "1.0"
-pretty_assertions = "1.2"
+
+[patch.crates-io]
+mappable-rc = { path = "/home/gibonus/code/gitimpo/mappable-rc" }

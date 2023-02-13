@@ -10,7 +10,7 @@ mod newtype;
 mod visit;
 
 pub use err::{ConvertErrors, ConvertResult, Error};
-pub use visit::{convert_doc, from_doc};
+pub use visit::{from_doc, from_doc_untyped};
 
 pub type DynRefl = Box<dyn Reflect>;
 
@@ -107,7 +107,7 @@ mod test {
         );
         register_more!((i128, f32, String, f32, u32), Option<u8>, Vec<String>, HashMap<String, f32>);
         let mut document: KdlDocument = text.parse().unwrap();
-        match convert_doc(document, &registry) {
+        match from_doc_untyped(document, &registry) {
             ConvertResult::Deserialized(val) => Ok(T::from_reflect(val.as_ref()).unwrap()),
             ConvertResult::Errors(errs) => Err(errs),
             ConvertResult::Exports(_) => panic!("Never call parse_kdl with an export node"),

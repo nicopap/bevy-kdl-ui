@@ -102,7 +102,7 @@ fn main() -> Result<()> {
     );
     for def in KDL_DEFS {
         let doc = def.parse().unwrap();
-        let reflect = match convert_doc(doc, &reg) {
+        let reflect = match from_doc_untyped(doc, &reg) {
             ConvertResult::Errors(errs) => return Err(errs.into()),
             ConvertResult::Exports(_) => panic!("shouldn't export anything in this example"),
             ConvertResult::Deserialized(reflect) => reflect,
