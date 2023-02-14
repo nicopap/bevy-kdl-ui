@@ -2,7 +2,7 @@ use std::any::{type_name, Any};
 use std::fmt;
 
 use bevy_reflect::{FromReflect, Reflect, TypeRegistration, TypeRegistry, Typed};
-use bevy_reflect_deser::{from_doc, from_doc_untyped, ConvertErrors, ConvertResult};
+use bevy_kdl_reflect_deser::{from_doc, from_doc_untyped, ConvertErrors, ConvertResult};
 use bevy_utils::HashMap;
 use miette::GraphicalReportHandler;
 

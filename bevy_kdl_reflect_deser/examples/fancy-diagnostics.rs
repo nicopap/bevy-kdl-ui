@@ -1,5 +1,5 @@
 use bevy_reflect::{FromReflect, Reflect, TypeRegistration, TypeRegistry};
-use bevy_reflect_deser::*;
+use bevy_kdl_reflect_deser::*;
 use bevy_utils::HashMap;
 use miette::Result;
 

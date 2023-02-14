@@ -1,5 +1,5 @@
 [workspace]
-members = ["bevy-reflect-deser", "template-kdl", "multierr-span", "bevy-kdl-scene"]
+members = ["bevy_kdl_reflect_deser", "template_kdl", "multierr_span", "bevy_kdl_scene"]
 resolver = "2"
 
 [workspace.dependencies]

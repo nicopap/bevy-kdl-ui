@@ -1,7 +1,7 @@
 [package]
-name = "bevy-reflect-deser"
+name = "bevy_kdl_reflect_deser"
 authors = ["Nicola Papale"]
-description = "A deserializer using bevy_reflect currently only supports template-kdl"
+description = "A deserializer using bevy_reflect currently only supports template_kdl"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["bevy", "markup"]
@@ -16,9 +16,9 @@ default = ["fancy-errors"]
 
 [dependencies]
 strsim = { workspace = true, optional = true }
-multierr-span = { version = "0.4.0", path = "../multierr-span"}
+multierr_span = { version = "0.4.0", path = "../multierr_span"}
 thiserror = { workspace = true }
-template-kdl = { version = "0.4.0", path = "../template-kdl"}
+template_kdl = { version = "0.4.0", path = "../template_kdl"}
 bevy_reflect = { workspace = true }
 kdl = { workspace = true }
 nonmax = { workspace = true }

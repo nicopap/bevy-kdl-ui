@@ -1,5 +1,5 @@
 [package]
-name = "multierr-span"
+name = "multierr_span"
 authors = ["Nicola Papale"]
 description = "A crate to simplify dealing with accumulating errors and spans"
 license = "MIT OR Apache-2.0"

@@ -132,7 +132,7 @@ See the relevant sections in the respective crate READMEs.
   - [ ] ?? Make bevy-reflect-deser independent from tempalte-kdl
   - [ ] ?? Use the `NodeThunkExt` API to create a `kdl-serde`
 - [ ] ?? Handle Enum (waiting on https://github.com/bevyengine/bevy/pull/4761)
-- [ ] Rename all crates so that they don't use dashes!
+- [X] Rename all crates so that they don't use dashes!
 - [ ] Publish crates
 
 [arc-decision]: ./dev-resources/decisions#user-declared-list-of-additional-declarations

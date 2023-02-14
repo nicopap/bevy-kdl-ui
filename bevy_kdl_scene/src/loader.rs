@@ -6,7 +6,7 @@ use bevy_reflect::{Reflect, TypeUuid};
 use bevy_utils::BoxedFuture;
 use kdl::{KdlDocument, KdlError};
 
-use bevy_reflect_deser::ConvertErrors;
+use bevy_kdl_reflect_deser::ConvertErrors;
 use template_kdl::ExportedBindings;
 
 use thiserror::Error;

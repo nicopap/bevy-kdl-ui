@@ -66,7 +66,7 @@ impl ExportedBindings {
 pub fn get_imports(document: &KdlDocument) -> Result<Imports, Error> {
     let first_node = document.nodes().get(0);
     match first_node {
-        None => Err(Error::new(&(&document, 0), ErrorType::NoBody)).into(),
+        None => Err(Error::new(&(&document, 0), ErrorType::NoBody)),
         Some(node) => Ok(Imports::from_node(node)),
     }
 }

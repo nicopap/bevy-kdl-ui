@@ -1,5 +1,5 @@
 [package]
-name = "bevy-kdl-scene"
+name = "bevy_kdl_scene"
 authors = ["Nicola Papale"]
 description = "A Bevy scene format using KDL"
 license = "MIT OR Apache-2.0"
@@ -19,10 +19,10 @@ anyhow = { workspace = true }
 bevy_app = { workspace = true }
 bevy_asset = { workspace = true }
 bevy_ecs = { workspace = true }
-bevy-reflect-deser = { version = "0.4.0", path = "../bevy-reflect-deser" }
+bevy_kdl_reflect_deser = { version = "0.4.0", path = "../bevy_kdl_reflect_deser" }
 bevy_reflect = { workspace = true }
 bevy_utils = { workspace = true }
 kdl = { workspace = true }
 miette = { workspace = true }
-template-kdl = { version = "0.4.0", path = "../template-kdl"}
+template_kdl = { version = "0.4.0", path = "../template_kdl"}
 thiserror = { workspace = true }
