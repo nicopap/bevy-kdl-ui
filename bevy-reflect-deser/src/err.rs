@@ -29,7 +29,7 @@ mod miette_compat {
     }
 }
 use miette_compat::*;
-use template_kdl::{multi_err::MultiResult, Bindings};
+use template_kdl::{multi_err::MultiResult, ExportedBindings};
 
 use crate::DynRefl;
 
@@ -236,7 +236,7 @@ impl ConvertErrors {
 
 pub enum ConvertResult {
     Deserialized(DynRefl),
-    Exports(Bindings),
+    Exports(ExportedBindings),
     Errors(ConvertErrors),
 }
 impl ConvertResult {

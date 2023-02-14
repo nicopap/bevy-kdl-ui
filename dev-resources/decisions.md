@@ -168,6 +168,18 @@ be expanded.
 
 I think it's necessary to explicitly declare the bindings required for import.
 
+We define an `import` node. How it looks in the API:
+
+- `template_kdl::read_document` now requires a `RequiredBindings`
+- To get the `RequiredBindings`, we need to call `template_kdl::get_imports`
+  `template_kdl::get_imports` returns a `Imports`
+- `Imports::bindings` returns the `RequiredBindings` necessary for
+  `read_document`
+- As argument to `Imports::bindings`, we have a `ExportedTemplatesList`
+- `ExportedTemplatesList` aggregates templates from many different documents
+- The return value of `read_document` is an enum of either a computed node or
+  a list of `ExportedTemplates`.
+- This is a recursive process technically.
 
 ## bevy-reflect-deser
 

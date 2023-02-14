@@ -1,16 +1,20 @@
 mod bindings;
 pub mod err;
 mod field;
+mod import;
 pub mod multi_err;
 pub mod navigate;
 pub mod span;
 pub mod template;
 
-use std::sync::Arc;
+pub use import::Imports;
+use import::RequiredBindings;
+
+use std::{collections::HashMap, sync::Arc};
 
 use kdl::KdlDocument;
 
-use bindings::{Binding, Bindings as CrateBindings};
+use bindings::{Binding, Bindings};
 use err::{Error, ErrorType};
 use mappable_rc::Marc;
 use multi_err::{MultiError, MultiErrorTrait, MultiResult};
@@ -24,15 +28,17 @@ pub enum Document {
     /// The file represents a node.
     Node(NodeThunk),
     /// The file exports bindings.
-    Exports(Bindings),
+    Exports(ExportedBindings),
 }
 #[derive(Debug, Default, Clone)]
-pub struct Bindings {
-    public_bindings: CrateBindings,
+pub struct ExportedBindingsList {
+    list: HashMap<String, ExportedBindings>,
 }
-impl Bindings {
+#[derive(Debug, Default, Clone)]
+pub struct ExportedBindings(bindings::Export);
+impl ExportedBindings {
     // TODO(ERR): error handling when name not found in bindings
-    fn from_export(bindings: CrateBindings, scope_name: String, exposed: SpannedNode) -> Self {
+    fn from_export(bindings: Bindings, exposed: SpannedNode) -> Self {
         if let Value::List(values) = exposed.value() {
             let binding_names: Vec<_> = values
                 .filter_map(|field| {
@@ -49,19 +55,26 @@ impl Bindings {
                     Some((from, to.to_owned()))
                 })
                 .collect();
-            let public_bindings = bindings.exports(scope_name, &binding_names);
-            Self { public_bindings }
+            Self(bindings.exports(&binding_names))
         } else {
             panic!()
         }
     }
 }
 
+/// Returns imports required to read the file.
+pub fn get_imports(document: &KdlDocument) -> Result<Imports, Error> {
+    let first_node = document.nodes().get(0);
+    match first_node {
+        None => Err(Error::new(&(&document, 0), ErrorType::NoBody)).into(),
+        Some(node) => Ok(Imports::from_node(node)),
+    }
+}
 pub fn read_document(
     document: KdlDocument,
-    name: impl Into<String>,
-    pre_bindings: Bindings,
+    required: RequiredBindings,
 ) -> MultiResult<Document, Error> {
+    let has_import = import::has_node(&document);
     let doc = SpannedDocument::new(Marc::new(document), 0);
     let mut errors = MultiError::default();
     let node_count = KdlDocument::nodes(&doc).len();
@@ -70,15 +83,18 @@ pub fn read_document(
         return errors.into_errors(err);
     }
     let mut all_nodes = doc.nodes();
+    if has_import {
+        all_nodes.next().unwrap();
+    }
     let binding_nodes = all_nodes.by_ref().take(node_count - 1);
-    let bindings = binding_nodes.fold(pre_bindings.public_bindings, |bindings, body| {
+    let bindings = binding_nodes.fold(required.0, |bindings, body| {
         let (binding, errs) = Binding::new(body, bindings);
         errors.extend_errors(errs);
-        CrateBindings::Local(Arc::new(binding))
+        Bindings::Local(Arc::new(binding))
     });
     let last_node = all_nodes.next().unwrap();
     if last_node.name().value() == "export" {
-        let bindings = Bindings::from_export(bindings, name.into(), last_node);
+        let bindings = ExportedBindings::from_export(bindings, last_node);
         errors.into_result(Document::Exports(bindings))
     } else {
         let node = NodeThunk::new(last_node, bindings);
@@ -88,7 +104,7 @@ pub fn read_document(
 
 pub fn read_thunk(document: KdlDocument) -> MultiResult<NodeThunk, Error> {
     let err = Error::new(&(&document, 0), ErrorType::NotThunk);
-    read_document(document, "read_thunk", Default::default()).and_then(|doc| match doc {
+    read_document(document, Default::default()).and_then(|doc| match doc {
         Document::Exports(_) => MultiResult::Err(vec![err]),
         Document::Node(node) => MultiResult::Ok(node),
     })

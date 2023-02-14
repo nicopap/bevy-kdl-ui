@@ -457,6 +457,44 @@ With entries:
 export my-favorite="my-favorite-washing-machine" simple="simple-washing-machine"
 ```
 
+### `import` node
+
+If a template-kdl depends on externally-defined templates, you must define them
+in an `import` node, present as the first node in the document.
+
+This is necessary. A shortcoming of template-kdl's very powerfull template
+system is that it is nearly impossible to distinguish a template from an actual
+terminal node. the `import` node allows you to tell template-kdl what names
+in the file are expected to be templates.
+
+#### Syntax
+
+It is similar to the `export` node
+
+```kdl
+import {
+  // "my-favorite" is the name of the template as used in this file
+  // "my-favorite-washing-machine" is the name of the template in the bindings.
+  my-favorite="my-favorite-washing-machine"
+  simple="simple-washing-machine"
+}
+laundry-detergent  {
+  expand "ingredients" {
+    Surfactant "alcohol ethoxylate"
+    Builder "sodium carbonate"
+    Bleach "sodium perborate"
+  }
+  Detergent {
+    expand "ingredients"
+  }
+}
+LastNodeInFile {
+  my-favorite {
+    laundry-detergent
+  }
+}
+```
+
 ### Rust API
 
 TODO

@@ -82,11 +82,11 @@ See the relevant sections in the respective crate READMEs.
 - [X] ?? Non-String Map access.
 - [ ] Add a `if_equal foo bar` template built-in.
 - [ ] Add features to template-kdl & bevy-reflect-deser that makes bevy-kdl-scene possible:
-  - [ ] template-kdl: `import` node for binding discoverability.
+  - [X] template-kdl: `import` node for binding discoverability.
   - [ ] bevy-reflect-deser: `Entity` map for easier-to-edit templates, allows
         refering to other entities by a handle (such as a string or number)
-  - [ ] bevy-reflect-deser: Accept a list of bindings
-  - [ ] bevy-reflect-deser: Pass forward the template-kdl import node
+  - [X] bevy-reflect-deser: Accept a list of bindings
+  - [X] bevy-reflect-deser: Pass forward the template-kdl import node
 - [ ] bevy-kdl-scene features:
   - [X] in template-kdl: remove dependency on pointers, own shit so that it might be
         possible to use templates in a concurrent context. (see [arc-decision])
@@ -132,6 +132,8 @@ See the relevant sections in the respective crate READMEs.
   - [ ] ?? Make bevy-reflect-deser independent from tempalte-kdl
   - [ ] ?? Use the `NodeThunkExt` API to create a `kdl-serde`
 - [ ] ?? Handle Enum (waiting on https://github.com/bevyengine/bevy/pull/4761)
+- [ ] Rename all crates so that they don't use dashes!
+- [ ] Publish crates
 
 [arc-decision]: ./dev-resources/decisions#user-declared-list-of-additional-declarations
 [deser-decision]: ./dev-resources/decisions#create-a-deserializer-that-encapsulates-completely-parsing

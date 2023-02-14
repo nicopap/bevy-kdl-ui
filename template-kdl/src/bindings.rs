@@ -8,10 +8,20 @@ use crate::{
     template::{Context, Declaration, NodeThunk},
 };
 
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Export(Vec<Arc<Binding>>);
+impl Export {
+    pub(crate) fn get(&self, name: &str) -> Option<&Arc<Binding>> {
+        todo!()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum Bindings {
     Local(Arc<Binding>),
-    Exported(Vec<Arc<Binding>>),
+    Imports {
+        exposed: Vec<(Marc<str>, Arc<Binding>)>,
+    },
     Terminal,
 }
 impl Default for Bindings {
@@ -29,20 +39,19 @@ impl Bindings {
     }
     // TODO(ERR): error handling when name not found in bindings
     // TODO(PERF): Use `Cow` here
-    pub(crate) fn exports(self, scope_name: String, exposed: &[(Marc<str>, String)]) -> Self {
+    pub(crate) fn exports(self, exposed: &[(Marc<str>, String)]) -> Export {
         let expose_name = |binding_name: &str| {
             exposed
                 .iter()
                 .find_map(|(from, to)| (binding_name == &**from).then_some(to))
         };
         let exposed = self.visit().filter_map(|binding| {
-            expose_name(binding.name.as_ref()).map(|new_name| Binding {
+            expose_name(&binding.name).map(|new_name| Binding {
                 name: new_name.to_owned().into(),
-                scope: Some(scope_name.clone()),
-                ..Binding::clone(&**binding)
+                ..Binding::clone(binding)
             })
         });
-        Self::Exported(exposed.map(Arc::new).collect())
+        Export(exposed.map(Arc::new).collect())
     }
     pub(crate) fn thunk(&self, body: SpannedNode) -> NodeThunk {
         NodeThunk { body, context: Context::new(self.clone()) }
@@ -57,10 +66,10 @@ impl<'a> Iterator for BindingsIter<'a> {
     type Item = &'a Arc<Binding>;
     fn next(&mut self) -> Option<Self::Item> {
         match self.inner {
-            Bindings::Exported(v) => {
-                let v = v.get(self.exported_idx as usize)?;
+            Bindings::Imports { exposed, .. } => {
+                let v = exposed.get(self.exported_idx as usize)?;
                 self.exported_idx += 1;
-                Some(v)
+                Some(&v.1)
             }
             Bindings::Local(current) => {
                 self.inner = &current.bindings;
@@ -71,10 +80,20 @@ impl<'a> Iterator for BindingsIter<'a> {
     }
 }
 /// A name binding. Later usages of this will cause an expension.
+///
+/// [`Binding`] is a linked list, where each element is a:
+///
+/// - `name`: The name of the binding
+/// - `declaration`: The definition of the binding
+///
+/// Each [`Binding`] points to the **previous bindings**, which means also the
+/// **bindings that are available** in `declaration` when interpreted.
+///
+/// Either a [`Bindings::Terminal`] or [`Bindings::Imports`] marks the end of
+/// the list.
 #[derive(Debug, Clone)]
 pub(crate) struct Binding {
     pub(crate) name: Marc<str>,
-    pub(crate) scope: Option<String>,
     // TODO(PERF): This is a linked list of bindings. Probably kills
     // performance due to low cache locality. discussed in
     // decision.md#binding-list-issue-again
@@ -89,7 +108,6 @@ impl Binding {
             name: node.name().value().to_owned().into(),
             declaration,
             bindings,
-            scope: None,
         })
     }
     fn try_invoke(&self, invocation: &NodeThunk) -> Option<NodeThunk> {

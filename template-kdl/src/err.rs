@@ -4,6 +4,11 @@ use kdl::KdlValue;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq)]
 pub enum ErrorType {
+    #[error(
+        "The document imports some tempaltes that are missing from the \
+        provided context: {0:?}"
+    )]
+    MissingTemplates(Vec<String>),
     #[error("Template parameters should have an explicit name, instead got {0:?}")]
     NonstringParam(KdlValue),
     #[error("Template node parameters should have a unique child node")]
