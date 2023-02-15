@@ -1,7 +1,7 @@
 /*! handle and parse imports
 */
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use kdl::{KdlDocument, KdlNode};
 use mappable_rc::Marc;
@@ -66,19 +66,28 @@ impl Imports {
             .flat_map(|m| m.keys())
             .map(|k| k.as_ref())
     }
+    pub fn required_files(&self) -> HashSet<&str> {
+        // TODO(ERR): Advise when dependency is not specified as a file (foobar.kdl/template)
+        self.mapping
+            .iter()
+            .flat_map(|m| m.keys())
+            .flat_map(|f| f.rsplit_once('/'))
+            .map(|k| k.0)
+            .collect()
+    }
     // TODO: name is silly
-    pub fn bindings(self, bindings: &ExportedBindingsList) -> Result<RequiredBindings, Error> {
+    pub fn bindings(&self, bindings: &ExportedBindingsList) -> Result<RequiredBindings, Error> {
         let mut exposed = Vec::new();
-        if let Some(mapping) = self.mapping {
+        if let Some(mapping) = &self.mapping {
             let mut missing = Vec::new();
             for (context_name, binding_name) in mapping {
                 // TODO: more granular error handling.
                 let Some((file, template_name)) = context_name.rsplit_once('/') else {
-                    missing.push(context_name);
+                    missing.push(context_name.clone());
                     continue;
                 };
                 let Some(binding) = bindings.list.get(file).and_then(|l| l.0.get(template_name)) else {
-                    missing.push(context_name);
+                    missing.push(context_name.clone());
                     continue;
                 };
                 exposed.push((binding_name.clone(), binding.clone()))

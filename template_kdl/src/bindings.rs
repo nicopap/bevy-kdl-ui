@@ -12,7 +12,7 @@ use crate::{
 pub(crate) struct Export(Vec<Arc<Binding>>);
 impl Export {
     pub(crate) fn get(&self, name: &str) -> Option<&Arc<Binding>> {
-        todo!()
+        self.0.iter().find(|b| &*b.name == name)
     }
 }
 

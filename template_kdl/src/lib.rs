@@ -8,7 +8,7 @@ pub mod span;
 pub mod template;
 
 pub use import::Imports;
-use import::RequiredBindings;
+pub use import::RequiredBindings;
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -31,8 +31,8 @@ pub enum Document {
     Exports(ExportedBindings),
 }
 #[derive(Debug, Default, Clone)]
-pub struct ExportedBindingsList {
-    list: HashMap<String, ExportedBindings>,
+pub struct ExportedBindingsList<'b> {
+    pub list: HashMap<&'b str, ExportedBindings>,
 }
 #[derive(Debug, Default, Clone)]
 pub struct ExportedBindings(bindings::Export);

@@ -16,13 +16,10 @@ default = []
 
 [dependencies]
 anyhow = { workspace = true }
-bevy_app = { workspace = true }
-bevy_asset = { workspace = true }
-bevy_ecs = { workspace = true }
 bevy_kdl_reflect_deser = { version = "0.4.0", path = "../bevy_kdl_reflect_deser" }
-bevy_reflect = { workspace = true }
-bevy_utils = { workspace = true }
+bevy = { workspace = true, default-features = false, features = [ "bevy_asset" ] }
 kdl = { workspace = true }
 miette = { workspace = true }
+slotmap = { workspace = true }
 template_kdl = { version = "0.4.0", path = "../template_kdl"}
 thiserror = { workspace = true }

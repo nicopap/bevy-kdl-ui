@@ -100,7 +100,8 @@ See the relevant sections in the respective crate READMEs.
   - [ ] Add "kdl markers" to nodes spawned, so that it might be eventually
         possible to round-trip the world
   - [ ] Read and add to assets the last node in the kdl file
-  - [ ] Check for `Added<Handle<Cuddly>>` and add scene
+  - [X] ~~Check for `Added<Handle<Cuddly>>` and add scene~~ -> Can't use asset system
+  - [ ] Spawn a scene in the Bevy ECS.
 - [ ] Proper error reporting and handling
   - [ ] Error handling in `template-kdl`
   - [ ] Deduplicate similar errors in `bevy-reflect-deser` (in
