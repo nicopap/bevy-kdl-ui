@@ -101,7 +101,14 @@ See the relevant sections in the respective crate READMEs.
         possible to round-trip the world
   - [ ] Read and add to assets the last node in the kdl file
   - [X] ~~Check for `Added<Handle<Cuddly>>` and add scene~~ -> Can't use asset system
-  - [ ] Spawn a scene in the Bevy ECS.
+  - [X] Spawn a scene in the Bevy ECS.
+  - [ ] Keep track of origin of each individual componets or fields
+    - [ ] in bevy_kdl_reflect_deser: do not create `Box<dyn Reflect>`, but rather
+          a wrapper type storing the span/file location and the `dyn Reflect`
+    - [ ] in bevy_kdl_reflect_deser: In this wrapper, also handle separately
+          `Entity`, so that they can be
+    - [ ] in bevy_kdl_scene: When deserializing, make sure to collect all `ReferBy`
+          before deserializing `Entity`
 - [ ] Proper error reporting and handling
   - [ ] Error handling in `template-kdl`
   - [ ] Deduplicate similar errors in `bevy-reflect-deser` (in

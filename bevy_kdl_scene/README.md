@@ -101,8 +101,7 @@ for their scene descriptions.
 It is possible to create definition `kdl` files and export their templates to
 re-use them in other files. Just name your final node `export` and provide
 as argument the name of the templates you wish to export. To use a template
-defined in another file, just prefix it with the name of the file it was
-declared in. `template-kdl` does not support namespacing.
+defined in another file, import them with a `import` node.
 
 In `assets/base.kdl`:
 ```kdl
@@ -115,7 +114,7 @@ character "@id" "@hp" "@marker" {
   }
 }
 enemy "@id" "@type" "@hp" {
-  !character "@id" "@hp" {
+  character "@id" "@hp" {
     Enemy "@type"
   }
 }
@@ -125,13 +124,17 @@ export "character" "enemy"
 In `assets/room.kdl`:
 
 ```kdl
+import {
+  !character="base.kdl/character"
+  !enemy="base.kdl/enemy"
+}
 scene {
-  "base.kdl/character" "player" 10 {
+  !character "player" 10 {
     Player
   }
-  "base.kdl/enemy" "enemy1" "Goblin" 5
-  "base.kdl/enemy" "enemy2" "Troll" 20
-  "base.kdl/enemy" "enemy3" "Kobold" 15
+  !enemy "enemy1" "Goblin" 5
+  !enemy "enemy2" "Troll" 20
+  !enemy "enemy3" "Kobold" 15
 }
 ```
 

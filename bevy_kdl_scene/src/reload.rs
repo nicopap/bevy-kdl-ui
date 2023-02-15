@@ -121,6 +121,11 @@ pub trait AssetManager {
 }
 
 pub struct Plug<T: AssetManager>(PhantomData<fn(T)>);
+impl<T: AssetManager> Plug<T> {
+    pub fn new() -> Self {
+        Self(PhantomData)
+    }
+}
 
 impl<MNG: AssetManager + SystemParam + 'static> Plugin for Plug<MNG>
 where
